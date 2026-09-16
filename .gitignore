@@ -1,0 +1,12 @@
+# Database dumps: may contain real patient data, and are far too large for git.
+# Ship these to object storage, never to version control.
+backups/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.pyc
+.DS_Store

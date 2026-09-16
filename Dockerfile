@@ -39,10 +39,15 @@ ENV VIRTUAL_ENV=/opt/venv \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Runtime artifacts only: the installed deps and the app code
+# Runtime artifacts only: the installed deps, app code, and the migration
+# scripts. Migrations ship in the image so the exact code being deployed
+# carries the exact schema it expects.
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /home/app
 COPY --chown=app:app app/ ./app/
+COPY --chown=app:app migrations/ ./migrations/
+COPY --chown=app:app scripts/ ./scripts/
+COPY --chown=app:app alembic.ini ./alembic.ini
 
 USER app
 

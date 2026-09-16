@@ -9,12 +9,14 @@ venv/
 .env
 .env.*
 *.md
+docs/
 tests/
 .pytest_cache/
 .ruff_cache/
 data/
 outputs/
 notebooks/
+backups/
 Dockerfile
 .dockerignore
 docker-compose*.yml
