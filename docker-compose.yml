@@ -1,0 +1,54 @@
+# Default stack for CareRoute.
+#   docker compose up --build     start (rebuilds if the Dockerfile changed)
+#   docker compose down           stop and remove
+#
+# The healthcheck is inherited from the Dockerfile, so `docker compose ps`
+# reports healthy/unhealthy without repeating it here.
+
+services:
+  api:
+    build:
+      context: .
+    image: careroute:local
+    container_name: careroute-api
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: local
+    restart: unless-stopped
+
+    # --- Adding a database later -------------------------------------
+    # Uncomment this block AND the `db` service below, then run
+    # `docker compose up --build`. The api container will wait for
+    # Postgres to report healthy before it starts.
+    #
+    # environment:
+    #   APP_ENV: local
+    #   DATABASE_URL: postgresql://careroute:careroute@db:5432/careroute
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+
+# --- Optional Postgres -------------------------------------------------
+# Uncomment together with the `depends_on` block above.
+#
+#   db:
+#     image: postgres:16-alpine
+#     container_name: careroute-db
+#     environment:
+#       POSTGRES_USER: careroute
+#       POSTGRES_PASSWORD: careroute
+#       POSTGRES_DB: careroute
+#     ports:
+#       - "5432:5432"
+#     volumes:
+#       - careroute-pgdata:/var/lib/postgresql/data
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U careroute -d careroute"]
+#       interval: 5s
+#       timeout: 3s
+#       retries: 10
+#     restart: unless-stopped
+#
+# volumes:
+#   careroute-pgdata:

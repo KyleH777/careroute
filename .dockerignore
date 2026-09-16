@@ -17,3 +17,4 @@ outputs/
 notebooks/
 Dockerfile
 .dockerignore
+docker-compose*.yml

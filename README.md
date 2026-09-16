@@ -6,7 +6,9 @@ application code into a clean `python:3.12-slim` image. No compilers, no pip
 cache, no `.git` in the shipped image. Runs as a non-root `app` user.
 
 Verified: builds clean, serves on port 8000, healthcheck reports `healthy`,
-final image 285MB.
+final image 285MB. Compose stack starts healthy, and the dev overlay's live
+reload was confirmed by editing a file and watching the response change
+without a rebuild.
 
 ## One-time PATH setup
 
@@ -30,16 +32,10 @@ PATH too.
 
 Everything else works unchanged.
 
-## Build
+## Run it (compose — the normal way)
 
 ```bash
-docker build -t careroute:local .
-```
-
-## Run
-
-```bash
-docker run --rm -p 8000:8000 --name careroute careroute:local
+docker compose up --build
 ```
 
 Then in another terminal:
@@ -48,40 +44,60 @@ Then in another terminal:
 curl http://localhost:8000/health
 ```
 
-## Run in the background
+## Stop and remove
 
 ```bash
-docker run -d -p 8000:8000 --name careroute careroute:local
+docker compose down
+```
+
+## Live reload while you work
+
+Mounts your local `app/` over the image's copy and restarts uvicorn on every
+save, so you can edit code without rebuilding.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
 ## Follow logs
 
 ```bash
-docker logs -f careroute
+docker compose logs -f api
 ```
 
-## Check health status
+## Check status and health
 
 ```bash
-docker inspect --format '{{.State.Health.Status}}' careroute
+docker compose ps
 ```
 
 ## Shell into the running container
 
 ```bash
-docker exec -it careroute /bin/bash
+docker compose exec api /bin/bash
 ```
 
-## Stop and remove
+## Adding a database later
+
+`docker-compose.yml` has a commented-out Postgres service and the matching
+`depends_on` block. Uncomment both, then `docker compose up --build`. The api
+waits for Postgres to report healthy before starting, and `DATABASE_URL` is
+already wired to the `db` hostname.
+
+## Plain docker, without compose
 
 ```bash
-docker rm -f careroute
+docker build -t careroute:local .
+```
+
+```bash
+docker run --rm -p 8000:8000 --name careroute careroute:local
 ```
 
 ## Rebuild from scratch (no cache)
 
 ```bash
-docker build --no-cache -t careroute:local .
+docker compose build --no-cache
 ```
 
 ## Notes on the layer caching

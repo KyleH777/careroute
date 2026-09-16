@@ -1,0 +1,18 @@
+# Development overlay: live reload. Your local app/ directory is mounted
+# over the one baked into the image, and uvicorn restarts on every save,
+# so you can edit code without rebuilding.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Requires nothing extra — watchfiles ships with uvicorn[standard], which
+# is already in requirements.txt.
+
+services:
+  api:
+    volumes:
+      - ./app:/home/app/app:ro
+    environment:
+      APP_ENV: dev
+    command:
+      ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    restart: "no"
