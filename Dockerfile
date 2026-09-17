@@ -23,7 +23,8 @@ WORKDIR /build
 # until requirements.txt changes, so code edits don't re-install deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip uninstall -y pip
 
 # ============================================================
 # Stage 2: runtime — minimal image, only runtime artifacts.
@@ -37,6 +38,14 @@ FROM python:3.12-slim AS runtime
 RUN apt-get update \
     && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
+
+# pip is never invoked at runtime (deps are already installed into the venv
+# we copy in below) but the base image ships its own system-Python pip, and
+# pip vendors old copies of msgpack/setuptools that scanners flag as
+# vulnerable. Removing it drops those findings entirely.
+RUN python3 -m pip uninstall -y pip 2>/dev/null; \
+    rm -rf /usr/local/lib/python3.12/site-packages/pip* \
+        /usr/local/bin/pip*
 
 # Never run as root inside the container
 RUN groupadd --system app && useradd --system --gid app --create-home app
