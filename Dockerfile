@@ -31,6 +31,13 @@ RUN pip install --no-cache-dir --upgrade pip \
 # ============================================================
 FROM python:3.12-slim AS runtime
 
+# Patch OS packages: the python:3.12-slim base image lags Debian's own repos,
+# which already carry fixes for critical CVEs in perl-base and libc6. This
+# picks up those fixes without waiting on an upstream image rebuild.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 # Never run as root inside the container
 RUN groupadd --system app && useradd --system --gid app --create-home app
 
