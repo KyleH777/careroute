@@ -9,21 +9,6 @@ virtualenv plus application code into a clean `python:3.12-slim` image. No
 compilers, no pip cache, no `.git` in the shipped image. Runs as a non-root
 `app` user.
 
-## One-time PATH setup
-
-The Docker CLI on this machine ships inside Docker Desktop and is not on your
-PATH. Add it once:
-
-```bash
-echo 'export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
-```
-
-Without this, `docker` is "command not found" — and using the full binary path
-alone still fails, because the `docker-credential-desktop` helper must be on
-PATH too.
-
----
-
 ## Start everything
 
 ```bash
