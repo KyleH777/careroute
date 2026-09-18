@@ -19,7 +19,7 @@ from app.models import (
     ReferralEvent,
     ReferralStatus,
 )
-from app.schemas import PatientCreate, PatientOut
+from app.schemas import PatientCreate, PatientOut, ReferralCreate, ReferralOut
 
 app = FastAPI(title="CareRoute")
 
@@ -120,3 +120,45 @@ def create_patient(
         ) from exc
     session.refresh(patient)
     return patient
+
+
+@app.post("/referrals", response_model=ReferralOut, status_code=status.HTTP_201_CREATED)
+def create_referral(
+    payload: ReferralCreate, session: Session = Depends(get_session)
+) -> Referral:
+    """Submit a new referral. Starts in DRAFT status; logs the first
+    referral_event (from_status=null -> DRAFT)."""
+    if session.get(Patient, payload.patient_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"patient {payload.patient_id} not found",
+        )
+    if session.get(Facility, payload.origin_facility_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"facility {payload.origin_facility_id} not found",
+        )
+
+    referral = Referral(
+        patient_id=payload.patient_id,
+        origin_facility_id=payload.origin_facility_id,
+        specialty_requested=payload.specialty_requested,
+        priority=payload.priority,
+        reason=payload.reason,
+        status=ReferralStatus.DRAFT,
+    )
+    session.add(referral)
+    session.flush()  # assigns referral.id for the event below
+
+    session.add(
+        ReferralEvent(
+            referral_id=referral.id,
+            from_status=None,
+            to_status=ReferralStatus.DRAFT,
+            actor=payload.actor,
+            note=payload.reason,
+        )
+    )
+    session.commit()
+    session.refresh(referral)
+    return referral
