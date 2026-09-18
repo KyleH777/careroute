@@ -4,9 +4,9 @@ Endpoints are intentionally thin — enough to prove the database wiring works
 end to end and to give the backup/restore drill something to verify against.
 """
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -19,6 +19,7 @@ from app.models import (
     ReferralEvent,
     ReferralStatus,
 )
+from app.schemas import PatientCreate, PatientOut
 
 app = FastAPI(title="CareRoute")
 
@@ -100,3 +101,22 @@ def worklist(
         }
         for r in rows
     ]
+
+
+@app.post("/patients", response_model=PatientOut, status_code=status.HTTP_201_CREATED)
+def create_patient(
+    payload: PatientCreate, session: Session = Depends(get_session)
+) -> Patient:
+    """Create a patient. 409s if the MRN is already in use."""
+    patient = Patient(**payload.model_dump())
+    session.add(patient)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"patient with mrn '{payload.mrn}' already exists",
+        ) from exc
+    session.refresh(patient)
+    return patient
