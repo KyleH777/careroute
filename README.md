@@ -57,10 +57,23 @@ docker compose down -v
 | `GET /ready` | Readiness. Reports whether Postgres is reachable |
 | `GET /stats` | Row counts per table — used by the restore drill |
 | `GET /referrals/worklist` | Open referrals, most urgent first, then oldest first |
+| `POST /patients` | Create a patient. 409 on duplicate `mrn` |
+| `POST /referrals` | Submit a referral (starts in `draft`). 404 on missing patient/facility |
+| `POST /referrals/{id}/assign` | Assign a provider. 409 on closed referral, specialty mismatch, or provider not accepting patients |
+| `POST /referrals/{id}/status` | Transition status. 409 on an illegal transition |
+| `GET /referrals/{id}` | A referral plus its full status-change history |
 
 `/health` avoids the database on purpose: a slow database should not cause the
 orchestrator to kill an otherwise-healthy process. `/ready` is the one that
 reports database trouble.
+
+No endpoint requires authentication — matches the rest of the API. Every
+write endpoint takes an `actor` field (free text: who's making the change)
+which is what shows up in `referral_events`.
+
+Assigning a provider does not itself write a `referral_event` —
+`referral_events` is specifically a status-transition log, not a general
+audit trail.
 
 ---
 
@@ -99,6 +112,25 @@ Verify any new migration round-trips:
 ```bash
 docker compose run --rm migrate alembic downgrade base && docker compose run --rm migrate alembic upgrade head
 ```
+
+---
+
+## Running tests
+
+Tests run against their own ephemeral Postgres — never the dev database —
+under a separate Compose project name so the two stacks never collide:
+
+```bash
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
+docker compose -p careroute-test -f docker-compose.test.yml down -v
+```
+
+`--build` matters: `run` reuses an already-tagged image if one exists, so
+without it a stale `careroute:test` image can silently run old code.
+
+Test-only dependencies (`pytest`, `httpx`) live in `requirements-dev.txt`
+and a dedicated `test` Dockerfile stage — neither ships in the production
+image built by `docker compose build`.
 
 ---
 
@@ -213,3 +245,10 @@ Everything above was executed against this stack, not assumed:
 - Full disaster drill: fingerprint → backup → TRUNCATE everything → restore →
   all five table hashes identical, API functional, identity sequences correct
 - Archive also restores into a brand-new empty database
+- Referral write endpoints: full lifecycle (create patient → submit
+  referral → assign provider → transition through to completed) exercised
+  both by the pytest suite and manually against the live dev stack
+- Business rules reject what they should: illegal status transitions,
+  assigning a provider with the wrong specialty, assigning one that isn't
+  accepting new patients, and assigning to a referral that isn't open —
+  all return 409
