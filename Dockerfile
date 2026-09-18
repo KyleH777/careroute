@@ -73,3 +73,31 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# ============================================================
+# Stage 3: test-deps — builder's venv plus dev/test-only
+# dependencies (pytest, httpx). Never published.
+# ============================================================
+FROM builder AS test-deps
+
+# builder already uninstalled pip from its venv (see Stage 1); bring it
+# back just long enough to install the dev dependencies below. ensurepip
+# only creates versioned pip3/pip3.12 scripts here (no plain `pip`), so a
+# bare `pip install` would silently fall through PATH to the base image's
+# system pip and install outside the venv — `python -m pip` is unambiguous.
+RUN python -m ensurepip --upgrade
+
+COPY requirements-dev.txt .
+RUN python -m pip install --no-cache-dir -r requirements-dev.txt
+
+# ============================================================
+# Stage 4: test — the runtime image plus test-deps' venv (adds
+# pytest/httpx) and the tests/ directory. Used only by the
+# `test` service in docker-compose.test.yml; never pushed.
+# ============================================================
+FROM runtime AS test
+
+COPY --from=test-deps --chown=app:app /opt/venv /opt/venv
+COPY --chown=app:app tests/ ./tests/
+
+CMD ["pytest", "-v"]

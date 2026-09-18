@@ -1,0 +1,57 @@
+# Isolated test stack: ephemeral Postgres + a one-shot pytest run.
+#
+# Deliberately standalone — NOT merged with docker-compose.yml via -f. An
+# earlier version tried to override db's ports/volumes/container_name from
+# the dev compose file, but this Compose version's override-merge doesn't
+# clear list values with `[]` or unset scalars with `null`, so the "ports:
+# []" and "volumes: []" overrides were silently ignored and the test run
+# collided with the dev stack's already-running containers and port 5432.
+# Defining db/migrate/test standalone here sidesteps that entirely.
+#
+#   docker compose -p careroute-test -f docker-compose.test.yml run --rm test
+#   docker compose -p careroute-test -f docker-compose.test.yml down -v
+#
+# -p careroute-test keeps this stack's containers and network entirely
+# separate from the dev stack, which has real seeded data tests must not
+# touch.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: careroute
+      POSTGRES_PASSWORD: careroute
+      POSTGRES_DB: careroute
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U careroute -d careroute"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    # No published port, no named volume: reached only over this stack's
+    # internal network, and data must not survive between runs.
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    image: careroute:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  test:
+    build:
+      context: .
+      target: test
+    image: careroute:test
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+    command: ["pytest", "-v"]

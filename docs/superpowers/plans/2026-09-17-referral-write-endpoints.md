@@ -4,7 +4,7 @@
 
 **Goal:** Add the write side of the referral lifecycle to CareRoute's API — create a patient, submit a referral, assign a provider, transition status, and view a referral's full history — with validated business rules and no auth, per `docs/superpowers/specs/2026-09-17-referral-write-endpoints-design.md`.
 
-**Architecture:** Two new pure-Python modules (`app/schemas.py` for request/response shapes, `app/referral_rules.py` for the transition state machine and assignment validation) plumbed into five new thin routes in `app/main.py`. A new isolated pytest harness (separate Dockerfile stage + `docker-compose.test.yml` overlay + its own Postgres, run under a distinct Compose project name) verifies all of it without touching the dev database or bloating the production image.
+**Architecture:** Two new pure-Python modules (`app/schemas.py` for request/response shapes, `app/referral_rules.py` for the transition state machine and assignment validation) plumbed into five new thin routes in `app/main.py`. A new isolated pytest harness (separate Dockerfile stage + `docker-compose.test.yml` file + its own Postgres, run under a distinct Compose project name) verifies all of it without touching the dev database or bloating the production image.
 
 **Tech Stack:** FastAPI 0.141.1, SQLAlchemy 2.0, Pydantic v2, pytest 8.3, httpx (via FastAPI's `TestClient`), Postgres 16, Docker Compose.
 
@@ -88,11 +88,14 @@ Leave that as-is. After the full `runtime` stage (i.e., at the end of the file, 
 FROM builder AS test-deps
 
 # builder already uninstalled pip from its venv (see Stage 1); bring it
-# back just long enough to install the dev dependencies below.
+# back just long enough to install the dev dependencies below. ensurepip
+# only creates versioned pip3/pip3.12 scripts here (no plain `pip`), so a
+# bare `pip install` would silently fall through PATH to the base image's
+# system pip and install outside the venv — `python -m pip` is unambiguous.
 RUN python -m ensurepip --upgrade
 
 COPY requirements-dev.txt .
-RUN pip install --no-cache-dir -r requirements-dev.txt
+RUN python -m pip install --no-cache-dir -r requirements-dev.txt
 
 # ============================================================
 # Stage 4: test — the runtime image plus test-deps' venv (adds
@@ -107,25 +110,56 @@ COPY --chown=app:app tests/ ./tests/
 CMD ["pytest", "-v"]
 ```
 
-- [ ] **Step 4: Add the test compose overlay**
+- [ ] **Step 4: Add the test compose file**
 
-Create `docker-compose.test.yml`:
+Create `docker-compose.test.yml`. Deliberately **standalone** — not merged
+with `docker-compose.yml` via `-f`. An override-based version was tried
+first (`db: {ports: [], volumes: [], container_name: ...}` layered on top
+of `docker-compose.yml`), but on this Compose version, overriding a list
+field with `[]` or a scalar with `null` doesn't clear the base value — it's
+silently ignored — so the override attempt still collided with the dev
+stack's running `careroute-db` container and its published port 5432.
+Defining `db`/`migrate`/`test` standalone here sidesteps that entirely:
 ```yaml
 # Isolated test stack: ephemeral Postgres + a one-shot pytest run.
 #
-#   docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
-#   docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v
+#   docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
+#   docker compose -p careroute-test -f docker-compose.test.yml down -v
 #
 # Always run with -p careroute-test: a distinct Compose project name keeps
-# this stack's containers, network, and volumes entirely separate from the
-# dev stack (which has real seeded data you don't want tests anywhere near).
+# this stack's containers and network entirely separate from the dev stack
+# (which has real seeded data you don't want tests anywhere near). Always
+# pass --build: `run` does not rebuild an already-tagged image on its own,
+# so a stale careroute:test image would otherwise be reused silently.
 
 services:
   db:
-    # No published port and no named volume: tests reach db only over the
-    # internal Compose network, and data must not survive between runs.
-    ports: []
-    volumes: []
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: careroute
+      POSTGRES_PASSWORD: careroute
+      POSTGRES_DB: careroute
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U careroute -d careroute"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    # No published port, no named volume: reached only over this stack's
+    # internal network, and data must not survive between runs.
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    image: careroute:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
 
   test:
     build:
@@ -139,6 +173,23 @@ services:
       DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
     command: ["pytest", "-v"]
 ```
+
+- [ ] **Step 4a: Allow `tests/` into the Docker build context**
+
+`.dockerignore` excludes `tests/` (it was written before this feature
+existed, to keep test code out of the build context entirely). The new
+`test` Dockerfile stage needs to `COPY tests/`, so remove that line. This
+is safe for the production image: only the `test` stage copies `tests/` —
+`runtime` never does — so `careroute:local` is unaffected either way.
+
+Modify `.dockerignore`. Remove the `tests/` line:
+```
+*.md
+docs/
+.pytest_cache/
+```
+(previously `tests/` sat between `docs/` and `.pytest_cache/` — delete
+that line only, leave the rest as-is).
 
 - [ ] **Step 5: Add the shared test fixtures**
 
@@ -265,13 +316,13 @@ def test_health_endpoint_ok(client):
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: build succeeds, `db` becomes healthy, `migrate` exits 0, then pytest runs and reports `1 passed`.
 
 Then tear down:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v
+docker compose -p careroute-test -f docker-compose.test.yml down -v
 ```
 
 - [ ] **Step 7: Verify the production build wasn't affected**
@@ -287,10 +338,10 @@ Expected: build succeeds, and the scout summary still shows `0C` critical and th
 - [ ] **Step 8: Commit**
 
 ```bash
-git add docker-compose.yml docker-compose.test.yml requirements-dev.txt Dockerfile tests/
+git add docker-compose.yml docker-compose.test.yml requirements-dev.txt Dockerfile .dockerignore tests/
 git commit -m "test(careroute): add isolated pytest harness for write endpoints
 
-New docker-compose.test.yml overlay runs pytest against an ephemeral,
+New docker-compose.test.yml file runs pytest against an ephemeral,
 unpublished Postgres under its own Compose project name, so tests
 never touch the dev stack's seeded database. Test-only deps
 (pytest, httpx) live in requirements-dev.txt and a new Dockerfile
@@ -420,7 +471,7 @@ def test_validate_assignment_specialty_match_is_case_insensitive():
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.referral_rules'`.
 
@@ -490,11 +541,11 @@ def validate_assignment(referral: Referral, provider: Provider) -> None:
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for all tests in `test_referral_rules.py` (plus the smoke test).
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 5: Commit**
 
@@ -563,7 +614,7 @@ def test_referral_create_rejects_invalid_priority():
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.schemas'`.
 
@@ -661,11 +712,11 @@ class ReferralStatusRequest(BaseModel):
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for all tests in `test_schemas.py` (plus everything from Tasks 1–2).
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 5: Commit**
 
@@ -730,7 +781,7 @@ def test_create_patient_requires_mrn(client):
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: FAIL — `404 Not Found` (route doesn't exist yet).
 
@@ -786,11 +837,11 @@ def create_patient(
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for all tests in `test_patients.py` (plus everything from Tasks 1–3).
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 5: Commit**
 
@@ -887,7 +938,7 @@ def test_create_referral_writes_initial_draft_event(client, facility, patient, d
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: FAIL — `404 Not Found` (route doesn't exist yet).
 
@@ -952,11 +1003,11 @@ def create_referral(
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for all tests in `test_referrals_create.py` (plus everything from Tasks 1–4).
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 5: Commit**
 
@@ -1070,7 +1121,7 @@ def test_assign_409s_when_provider_not_accepting(client, db, submitted_referral,
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: FAIL — `404 Not Found` (route doesn't exist yet).
 
@@ -1159,11 +1210,11 @@ def assign_referral(
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for all tests in `test_referrals_assign.py` (plus everything from Tasks 1–5).
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 5: Commit**
 
@@ -1242,7 +1293,7 @@ def test_terminal_status_rejects_further_transitions(client, submitted_referral)
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: FAIL — `404 Not Found` (route doesn't exist yet).
 
@@ -1316,11 +1367,11 @@ def update_referral_status(
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for all tests in `test_referrals_status.py` (plus everything from Tasks 1–6).
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 5: Commit**
 
@@ -1375,7 +1426,7 @@ def test_get_referral_404s_for_missing_referral(client):
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: FAIL — `405 Method Not Allowed` (path exists for POST variants but not a bare GET on `/referrals/{id}`, or 404 depending on route matching — either way, not the `200` the test expects).
 
@@ -1440,11 +1491,11 @@ def get_referral(
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for all tests in `test_referrals_get.py` (plus everything from Tasks 1–7).
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 5: Commit**
 
@@ -1538,11 +1589,11 @@ def test_full_referral_lifecycle(client, facility, provider):
 
 Run:
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
 ```
 Expected: `PASSED` for `test_referral_lifecycle.py`, and the full suite (all tasks) reports something like `33 passed`.
 
-Tear down: `docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v`
+Tear down: `docker compose -p careroute-test -f docker-compose.test.yml down -v`
 
 - [ ] **Step 3: Commit**
 
@@ -1649,8 +1700,8 @@ Tests run against their own ephemeral Postgres — never the dev database —
 under a separate Compose project name so the two stacks never collide:
 
 ```bash
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml run --rm test
-docker compose -p careroute-test -f docker-compose.yml -f docker-compose.test.yml down -v
+docker compose -p careroute-test -f docker-compose.test.yml run --build --rm test
+docker compose -p careroute-test -f docker-compose.test.yml down -v
 ```
 
 Test-only dependencies (`pytest`, `httpx`) live in `requirements-dev.txt`
