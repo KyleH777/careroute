@@ -4,7 +4,8 @@ Endpoints are intentionally thin — enough to prove the database wiring works
 end to end and to give the backup/restore drill something to verify against.
 """
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -19,9 +20,27 @@ from app.models import (
     ReferralEvent,
     ReferralStatus,
 )
-from app.schemas import PatientCreate, PatientOut, ReferralCreate, ReferralOut
+from app.referral_rules import ReferralRuleViolation, validate_assignment
+from app.schemas import (
+    PatientCreate,
+    PatientOut,
+    ReferralAssignRequest,
+    ReferralCreate,
+    ReferralOut,
+)
 
 app = FastAPI(title="CareRoute")
+
+
+@app.exception_handler(ReferralRuleViolation)
+def handle_referral_rule_violation(
+    request: Request, exc: ReferralRuleViolation
+) -> JSONResponse:
+    """Referral lifecycle rule violations (bad transition, bad assignment)
+    are client errors, not server errors — map them to 409."""
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc)}
+    )
 
 # Tables the /stats endpoint reports on, in dependency order.
 _COUNTED = {
@@ -159,6 +178,35 @@ def create_referral(
             note=payload.reason,
         )
     )
+    session.commit()
+    session.refresh(referral)
+    return referral
+
+
+@app.post("/referrals/{referral_id}/assign", response_model=ReferralOut)
+def assign_referral(
+    referral_id: int,
+    payload: ReferralAssignRequest,
+    session: Session = Depends(get_session),
+) -> Referral:
+    """Assign a provider to a referral. Validated by
+    referral_rules.validate_assignment (status/specialty/capacity)."""
+    referral = session.get(Referral, referral_id)
+    if referral is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"referral {referral_id} not found",
+        )
+    provider = session.get(Provider, payload.provider_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"provider {payload.provider_id} not found",
+        )
+
+    validate_assignment(referral, provider)
+
+    referral.assigned_provider_id = provider.id
     session.commit()
     session.refresh(referral)
     return referral
