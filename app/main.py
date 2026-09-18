@@ -20,13 +20,18 @@ from app.models import (
     ReferralEvent,
     ReferralStatus,
 )
-from app.referral_rules import ReferralRuleViolation, validate_assignment
+from app.referral_rules import (
+    ReferralRuleViolation,
+    validate_assignment,
+    validate_transition,
+)
 from app.schemas import (
     PatientCreate,
     PatientOut,
     ReferralAssignRequest,
     ReferralCreate,
     ReferralOut,
+    ReferralStatusRequest,
 )
 
 app = FastAPI(title="CareRoute")
@@ -207,6 +212,38 @@ def assign_referral(
     validate_assignment(referral, provider)
 
     referral.assigned_provider_id = provider.id
+    session.commit()
+    session.refresh(referral)
+    return referral
+
+
+@app.post("/referrals/{referral_id}/status", response_model=ReferralOut)
+def update_referral_status(
+    referral_id: int,
+    payload: ReferralStatusRequest,
+    session: Session = Depends(get_session),
+) -> Referral:
+    """Transition a referral's status. Validated by
+    referral_rules.validate_transition; logs a referral_event on success."""
+    referral = session.get(Referral, referral_id)
+    if referral is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"referral {referral_id} not found",
+        )
+
+    validate_transition(referral.status, payload.to_status)
+
+    session.add(
+        ReferralEvent(
+            referral_id=referral.id,
+            from_status=referral.status,
+            to_status=payload.to_status,
+            actor=payload.actor,
+            note=payload.note,
+        )
+    )
+    referral.status = payload.to_status
     session.commit()
     session.refresh(referral)
     return referral
