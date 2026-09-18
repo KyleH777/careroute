@@ -30,8 +30,10 @@ from app.schemas import (
     PatientOut,
     ReferralAssignRequest,
     ReferralCreate,
+    ReferralEventOut,
     ReferralOut,
     ReferralStatusRequest,
+    ReferralWithEvents,
 )
 
 app = FastAPI(title="CareRoute")
@@ -247,3 +249,29 @@ def update_referral_status(
     session.commit()
     session.refresh(referral)
     return referral
+
+
+@app.get("/referrals/{referral_id}", response_model=ReferralWithEvents)
+def get_referral(
+    referral_id: int, session: Session = Depends(get_session)
+) -> ReferralWithEvents:
+    """Fetch a referral plus its full status-change history."""
+    referral = session.get(Referral, referral_id)
+    if referral is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"referral {referral_id} not found",
+        )
+    events = (
+        session.execute(
+            select(ReferralEvent)
+            .where(ReferralEvent.referral_id == referral_id)
+            .order_by(ReferralEvent.occurred_at)
+        )
+        .scalars()
+        .all()
+    )
+    return ReferralWithEvents(
+        **ReferralOut.model_validate(referral).model_dump(),
+        events=[ReferralEventOut.model_validate(e) for e in events],
+    )
