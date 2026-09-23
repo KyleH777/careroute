@@ -1,5 +1,7 @@
 # CareRoute — Containerized
 
+[![CI](https://github.com/KyleH777/careroute/actions/workflows/ci.yml/badge.svg)](https://github.com/KyleH777/careroute/actions/workflows/ci.yml)
+
 FastAPI + Postgres 16, with JWT authentication and role-based access control,
 Alembic migrations, a deterministic seed dataset, a tested backup/restore
 drill, and a CI pipeline that lints, tests, scans and publishes the image.
