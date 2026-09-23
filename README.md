@@ -1,3 +1,13 @@
+# What the hell is this? 
+CareRoute is a backend API for healthcare referral routing. When a doctor
+refers a patient to a specialist, the referral has to be tracked, routed to
+the right provider, and audited. I built it with FastAPI and Postgres, fully
+containerized, and the focus was production practices: authentication with
+role-based access, a tamper-resistant audit trail, versioned database
+migrations, a verified backup-and-restore drill, a hardened container image,
+and a CI pipeline that lints, tests, security-scans and publishes the image
+on every push.
+
 # CareRoute — Containerized
 
 [![CI](https://github.com/KyleH777/careroute/actions/workflows/ci.yml/badge.svg)](https://github.com/KyleH777/careroute/actions/workflows/ci.yml)
