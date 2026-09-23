@@ -22,7 +22,7 @@ once before the first build.
 |---|---|---|
 | Size | 325 MB | 234 MB |
 | Shell / package manager | yes / yes | no / no |
-| CRITICAL / HIGH CVEs (Docker Scout) | 0 / 2, no fix available | **0 / 0** |
+| CRITICAL / HIGH CVEs (Docker Scout, base VEX applied) | 0 / 2, no fix available | **0 / 0** |
 
 The HIGH count comes from Docker Scout with the base image's VEX statements
 applied. Those are Docker's published analysis of which CVEs actually affect the
@@ -35,8 +35,9 @@ docker scout vex get dhi.io/python:3.12-debian13 --output dhi-vex.json
 docker scout cves careroute:local --vex-location dhi-vex.json
 ```
 
-The image CI publishes carries a provenance attestation naming its base image,
-which is what lets Scout apply those statements automatically.
+Scout does **not** apply those statements to derived images on its own: a
+registry scan of the published image still lists the six HIGHs. Pass the VEX
+file explicitly, as above, to see the analyzed result.
 
 ## Start everything
 

@@ -132,8 +132,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          # Provenance records the base image, which lets Docker Scout apply
-          # the hardened base's VEX statements to this image. SBOM lists
-          # every package for anyone auditing the published image.
+          # Provenance records how and from what the image was built; the
+          # SBOM lists every package for anyone auditing the published image.
           provenance: mode=max
           sbom: true
