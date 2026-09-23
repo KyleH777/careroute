@@ -94,7 +94,7 @@ docker compose down -v
 | Path | Minimum role | Purpose |
 |---|---|---|
 | `GET /health` | public | Liveness. Deliberately does not touch the database |
-| `GET /ready` | public | Readiness. Reports whether Postgres is reachable |
+| `GET /ready` | public | Readiness. 503 when Postgres is unreachable |
 | `GET /stats` | public | Row counts per table — used by the restore drill |
 | `POST /auth/token` | public | Exchange email + password for a bearer token |
 | `GET /auth/me` | any | Who the presented token belongs to |
@@ -109,7 +109,7 @@ Interactive docs with a working **Authorize** button: <http://localhost:8000/doc
 
 `/health` avoids the database on purpose: a slow database should not cause the
 orchestrator to kill an otherwise-healthy process. `/ready` is the one that
-reports database trouble.
+reports database trouble, as a **503** so load balancers stop routing to it.
 
 Assigning a provider does not itself write a `referral_event` —
 `referral_events` is specifically a status-transition log, not a general
@@ -278,6 +278,17 @@ after a restore prove the same rows came back — not merely the same count.
 
 `backups/` is git-ignored: dumps may contain real patient data and belong in
 object storage, never in version control.
+
+---
+
+## Operations
+
+- **[On-call runbook](docs/RUNBOOK.md)**: symptoms, diagnosis and fixes for
+  database outages, failed starts, auth failures, rollbacks, restores and red
+  CI. Every procedure was run against this stack.
+- **[Incident response](docs/INCIDENT-RESPONSE.md)**: severity levels, roles,
+  communication, the security/PHI-exposure path, known gaps, and a
+  post-incident review template.
 
 ---
 

@@ -65,4 +65,5 @@ docker compose exec -T "$DB_SERVICE" psql -U "$DB_USER" -d "$DB_NAME" -t -c "
   UNION ALL SELECT 'patients', count(*) FROM patients
   UNION ALL SELECT 'referrals', count(*) FROM referrals
   UNION ALL SELECT 'referral_events', count(*) FROM referral_events
+  UNION ALL SELECT 'users', count(*) FROM users
   ORDER BY 1;"

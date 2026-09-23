@@ -4,7 +4,9 @@ Endpoints are intentionally thin — enough to prove the database wiring works
 end to end and to give the backup/restore drill something to verify against.
 """
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+import logging
+
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
@@ -50,6 +52,7 @@ from app.schemas import (
 )
 
 app = FastAPI(title="CareRoute")
+log = logging.getLogger("careroute")
 
 
 @app.exception_handler(ReferralRuleViolation)
@@ -85,16 +88,22 @@ def health() -> dict[str, str]:
 
 
 @app.get("/ready")
-def ready(session: Session = Depends(get_session)) -> dict[str, str]:
-    """Readiness probe: reports whether the database is actually reachable."""
+def ready(
+    response: Response, session: Session = Depends(get_session)
+) -> dict[str, str]:
+    """Readiness probe: 503 when the database is unreachable.
+
+    Load balancers and orchestrators act on the status code, not the body,
+    so "degraded" must be a non-2xx or traffic keeps flowing to an instance
+    whose every real request will fail. The underlying error goes to the
+    logs rather than this public response, since it can name internal hosts.
+    """
     try:
         session.execute(select(1))
     except SQLAlchemyError as exc:
-        return {
-            "status": "degraded",
-            "database": "unreachable",
-            "detail": str(exc)[:200],
-        }
+        log.warning("readiness check failed: database unreachable: %s", exc)
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "degraded", "database": "unreachable"}
     return {"status": "ok", "database": "reachable", "env": settings.app_env}
 
 

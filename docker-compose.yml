@@ -54,6 +54,9 @@ services:
     environment:
       APP_ENV: local
       DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      # Unset -> the app's built-in dev default. Override from the shell to
+      # rehearse a secret rotation: JWT_SECRET=<new> docker compose up -d api
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-change-me}
     depends_on:
       migrate:
         condition: service_completed_successfully
