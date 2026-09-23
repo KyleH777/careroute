@@ -54,4 +54,4 @@ services:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
-    command: ["pytest", "-v"]
+    command: ["pytest", "-v", "--cov=app", "--cov-report=term-missing"]
