@@ -13,7 +13,7 @@ Idempotent: re-running without --reset is a no-op rather than a duplicate load.
 
 Also creates one demo login per role (see DEMO_USERS), all sharing
 DEMO_PASSWORD. Because those credentials are published in the README, the
-script refuses to run unless APP_ENV is local or test.
+script refuses to run unless APP_ENV is local, dev or test.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from sqlalchemy import func, select, text
 sys.path.insert(0, "/home/app")
 
 from app.auth import hash_password
-from app.config import settings
+from app.config import DEV_ENVS, settings
 from app.db import SessionLocal
 from app.models import (
     Facility,
@@ -298,7 +298,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if settings.app_env not in ("local", "test"):
+    if settings.app_env not in DEV_ENVS:
         log.error(
             "refusing to seed APP_ENV=%r: this creates demo logins with a "
             "published password",

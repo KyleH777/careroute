@@ -187,3 +187,6 @@ def test_default_jwt_secret_refused_outside_dev():
         Settings(app_env="production", jwt_secret=DEV_JWT_SECRET)
 
     assert Settings(app_env="production", jwt_secret="x" * 48).app_env == "production"
+    # Every dev environment the Compose files use accepts the default.
+    for env in ("local", "dev", "test"):
+        assert Settings(app_env=env, jwt_secret=DEV_JWT_SECRET).app_env == env

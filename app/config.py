@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Only acceptable where APP_ENV says nothing real is at stake. Anywhere else,
 # Settings refuses to start with it (see _require_real_secret).
 DEV_JWT_SECRET = "dev-only-insecure-jwt-secret-change-me"
-_DEV_ENVS = {"local", "test"}
+DEV_ENVS = {"local", "dev", "test"}
 
 
 class Settings(BaseSettings):
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _require_real_secret(self) -> "Settings":
         """Fail fast rather than sign production tokens with a public key."""
-        if self.app_env not in _DEV_ENVS and self.jwt_secret == DEV_JWT_SECRET:
+        if self.app_env not in DEV_ENVS and self.jwt_secret == DEV_JWT_SECRET:
             raise ValueError(
                 f"JWT_SECRET must be set when APP_ENV={self.app_env!r}; "
                 "the built-in default is for local development only"
