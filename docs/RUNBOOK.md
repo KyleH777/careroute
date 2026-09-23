@@ -1,7 +1,13 @@
 # On-Call Runbook
 
-What to check, and what to run, when CareRoute misbehaves. Every symptom
-below was reproduced against the real stack, and every command was run.
+What to check, and what to run, when CareRoute misbehaves.
+
+**What's been verified against the live stack:** the database-outage
+symptoms and recovery, the missing-`JWT_SECRET` startup refusal, user
+lockout, secret rotation, the audit query, and the diagnostic commands. The
+restore is verified by the drill in BACKUP-RESTORE.md. **Not exercised
+here:** the schema-downgrade rollback (destructive), the Azure steps, and the
+disk-cleanup commands. Rehearse those on a copy before relying on them.
 
 For declaring an incident, severity, communication and follow-up, see
 **[INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)**. This runbook is the "how do I
