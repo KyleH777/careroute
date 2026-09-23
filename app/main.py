@@ -6,10 +6,20 @@ end to end and to give the backup/restore drill something to verify against.
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.auth import (
+    READ_ROLES,
+    ROUTING_ROLES,
+    WRITE_ROLES,
+    authenticate,
+    create_access_token,
+    get_current_user,
+    require_role,
+)
 from app.config import settings
 from app.db import get_session
 from app.models import (
@@ -19,6 +29,7 @@ from app.models import (
     Referral,
     ReferralEvent,
     ReferralStatus,
+    User,
 )
 from app.referral_rules import (
     ReferralRuleViolation,
@@ -34,6 +45,8 @@ from app.schemas import (
     ReferralOut,
     ReferralStatusRequest,
     ReferralWithEvents,
+    Token,
+    UserOut,
 )
 
 app = FastAPI(title="CareRoute")
@@ -57,6 +70,7 @@ _COUNTED = {
     "patients": Patient,
     "referrals": Referral,
     "referral_events": ReferralEvent,
+    "users": User,
 }
 
 
@@ -97,9 +111,42 @@ def stats(session: Session = Depends(get_session)) -> dict[str, int]:
     }
 
 
+@app.post("/auth/token", response_model=Token)
+def login(
+    form: OAuth2PasswordRequestForm = Depends(),
+    session: Session = Depends(get_session),
+) -> Token:
+    """Exchange email + password for a bearer token (OAuth2 password flow).
+
+    The form field is called `username` because the OAuth2 spec says so;
+    CareRoute expects an email address in it.
+    """
+    user = authenticate(session, form.username, form.password)
+    if user is None:
+        # Same response for unknown email, wrong password, or inactive
+        # account — don't tell a caller which emails exist.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return Token(
+        access_token=create_access_token(user),
+        expires_in=settings.jwt_ttl_minutes * 60,
+    )
+
+
+@app.get("/auth/me", response_model=UserOut)
+def me(user: User = Depends(get_current_user)) -> User:
+    """Who the presented token belongs to."""
+    return user
+
+
 @app.get("/referrals/worklist")
 def worklist(
-    limit: int = 20, session: Session = Depends(get_session)
+    limit: int = 20,
+    session: Session = Depends(get_session),
+    _user: User = Depends(require_role(*READ_ROLES)),
 ) -> list[dict[str, object]]:
     """Open referrals, most urgent first, then oldest first.
 
@@ -136,7 +183,9 @@ def worklist(
 
 @app.post("/patients", response_model=PatientOut, status_code=status.HTTP_201_CREATED)
 def create_patient(
-    payload: PatientCreate, session: Session = Depends(get_session)
+    payload: PatientCreate,
+    session: Session = Depends(get_session),
+    _user: User = Depends(require_role(*WRITE_ROLES)),
 ) -> Patient:
     """Create a patient. 409s if the MRN is already in use."""
     patient = Patient(**payload.model_dump())
@@ -155,7 +204,9 @@ def create_patient(
 
 @app.post("/referrals", response_model=ReferralOut, status_code=status.HTTP_201_CREATED)
 def create_referral(
-    payload: ReferralCreate, session: Session = Depends(get_session)
+    payload: ReferralCreate,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_role(*WRITE_ROLES)),
 ) -> Referral:
     """Submit a new referral. Starts in DRAFT status; logs the first
     referral_event (from_status=null -> DRAFT)."""
@@ -186,7 +237,7 @@ def create_referral(
             referral_id=referral.id,
             from_status=None,
             to_status=ReferralStatus.DRAFT,
-            actor=payload.actor,
+            actor=user.email,
             note=payload.reason,
         )
     )
@@ -200,6 +251,7 @@ def assign_referral(
     referral_id: int,
     payload: ReferralAssignRequest,
     session: Session = Depends(get_session),
+    _user: User = Depends(require_role(*ROUTING_ROLES)),
 ) -> Referral:
     """Assign a provider to a referral. Validated by
     referral_rules.validate_assignment (status/specialty/capacity)."""
@@ -229,6 +281,7 @@ def update_referral_status(
     referral_id: int,
     payload: ReferralStatusRequest,
     session: Session = Depends(get_session),
+    user: User = Depends(require_role(*WRITE_ROLES)),
 ) -> Referral:
     """Transition a referral's status. Validated by
     referral_rules.validate_transition; logs a referral_event on success."""
@@ -246,7 +299,7 @@ def update_referral_status(
             referral_id=referral.id,
             from_status=referral.status,
             to_status=payload.to_status,
-            actor=payload.actor,
+            actor=user.email,
             note=payload.note,
         )
     )
@@ -258,7 +311,9 @@ def update_referral_status(
 
 @app.get("/referrals/{referral_id}", response_model=ReferralWithEvents)
 def get_referral(
-    referral_id: int, session: Session = Depends(get_session)
+    referral_id: int,
+    session: Session = Depends(get_session),
+    _user: User = Depends(require_role(*READ_ROLES)),
 ) -> ReferralWithEvents:
     """Fetch a referral plus its full status-change history."""
     referral = session.get(Referral, referral_id)

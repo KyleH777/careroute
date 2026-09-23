@@ -1,6 +1,7 @@
 """Tests for POST /referrals."""
 
 from app.models import ReferralEvent
+from tests.conftest import COORDINATOR_EMAIL
 
 
 def test_create_referral_starts_in_draft_status(client, facility, patient):
@@ -10,7 +11,6 @@ def test_create_referral_starts_in_draft_status(client, facility, patient):
             "patient_id": patient.id,
             "origin_facility_id": facility.id,
             "specialty_requested": "Cardiology",
-            "actor": "dr.test",
         },
     )
     assert response.status_code == 201
@@ -27,7 +27,6 @@ def test_create_referral_404s_for_missing_patient(client, facility):
             "patient_id": 999999,
             "origin_facility_id": facility.id,
             "specialty_requested": "Cardiology",
-            "actor": "dr.test",
         },
     )
     assert response.status_code == 404
@@ -40,7 +39,6 @@ def test_create_referral_404s_for_missing_facility(client, patient):
             "patient_id": patient.id,
             "origin_facility_id": 999999,
             "specialty_requested": "Cardiology",
-            "actor": "dr.test",
         },
     )
     assert response.status_code == 404
@@ -53,7 +51,6 @@ def test_create_referral_writes_initial_draft_event(client, facility, patient, d
             "patient_id": patient.id,
             "origin_facility_id": facility.id,
             "specialty_requested": "Cardiology",
-            "actor": "dr.test",
             "reason": "chest pain",
         },
     )
@@ -64,5 +61,5 @@ def test_create_referral_writes_initial_draft_event(client, facility, patient, d
     assert len(events) == 1
     assert events[0].from_status is None
     assert events[0].to_status.value == "draft"
-    assert events[0].actor == "dr.test"
+    assert events[0].actor == COORDINATOR_EMAIL
     assert events[0].note == "chest pain"

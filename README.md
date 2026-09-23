@@ -1,7 +1,8 @@
 # CareRoute — Containerized
 
-FastAPI + Postgres 16, with Alembic migrations, a deterministic seed dataset,
-and a tested backup/restore drill.
+FastAPI + Postgres 16, with JWT authentication and role-based access control,
+Alembic migrations, a deterministic seed dataset, a tested backup/restore
+drill, and a CI pipeline that lints, tests, scans and publishes the image.
 
 Multi-stage Docker build: the build stage installs dependencies into a
 virtualenv with compilers available, and the final stage copies only that
@@ -32,7 +33,7 @@ curl -s http://localhost:8000/stats
 ```
 
 ```json
-{"facilities":5,"providers":24,"patients":120,"referrals":300,"referral_events":1002}
+{"facilities":5,"providers":24,"patients":120,"referrals":300,"referral_events":1002,"users":3}
 ```
 
 ## Stop
@@ -51,29 +52,71 @@ docker compose down -v
 
 ## Endpoints
 
-| Path | Purpose |
-|---|---|
-| `GET /health` | Liveness. Deliberately does not touch the database |
-| `GET /ready` | Readiness. Reports whether Postgres is reachable |
-| `GET /stats` | Row counts per table — used by the restore drill |
-| `GET /referrals/worklist` | Open referrals, most urgent first, then oldest first |
-| `POST /patients` | Create a patient. 409 on duplicate `mrn` |
-| `POST /referrals` | Submit a referral (starts in `draft`). 404 on missing patient/facility |
-| `POST /referrals/{id}/assign` | Assign a provider. 409 on closed referral, specialty mismatch, or provider not accepting patients |
-| `POST /referrals/{id}/status` | Transition status. 409 on an illegal transition |
-| `GET /referrals/{id}` | A referral plus its full status-change history |
+| Path | Minimum role | Purpose |
+|---|---|---|
+| `GET /health` | public | Liveness. Deliberately does not touch the database |
+| `GET /ready` | public | Readiness. Reports whether Postgres is reachable |
+| `GET /stats` | public | Row counts per table — used by the restore drill |
+| `POST /auth/token` | public | Exchange email + password for a bearer token |
+| `GET /auth/me` | any | Who the presented token belongs to |
+| `GET /referrals/worklist` | viewer | Open referrals, most urgent first, then oldest first |
+| `GET /referrals/{id}` | viewer | A referral plus its full status-change history |
+| `POST /patients` | clinician | Create a patient. 409 on duplicate `mrn` |
+| `POST /referrals` | clinician | Submit a referral (starts in `draft`). 404 on missing patient/facility |
+| `POST /referrals/{id}/status` | clinician | Transition status. 409 on an illegal transition |
+| `POST /referrals/{id}/assign` | coordinator | Assign a provider. 409 on closed referral, specialty mismatch, or provider not accepting patients |
+
+Interactive docs with a working **Authorize** button: <http://localhost:8000/docs>
 
 `/health` avoids the database on purpose: a slow database should not cause the
 orchestrator to kill an otherwise-healthy process. `/ready` is the one that
 reports database trouble.
 
-No endpoint requires authentication — matches the rest of the API. Every
-write endpoint takes an `actor` field (free text: who's making the change)
-which is what shows up in `referral_events`.
-
 Assigning a provider does not itself write a `referral_event` —
 `referral_events` is specifically a status-transition log, not a general
 audit trail.
+
+---
+
+## Authentication
+
+Staff accounts live in the `users` table (argon2id password hashes). Log in
+with the OAuth2 password flow to get a short-lived HS256 JWT, then send it as
+`Authorization: Bearer <token>`.
+
+The seed script creates one demo login per role, all with password
+`careroute-demo`:
+
+| Email | Role | Can |
+|---|---|---|
+| `viewer@careroute.demo` | viewer | Read referrals and the worklist |
+| `clinician@careroute.demo` | clinician | + create patients, submit referrals, change status |
+| `coordinator@careroute.demo` | coordinator | + assign providers |
+
+```bash
+TOKEN=$(curl -s -X POST localhost:8000/auth/token \
+  -d username=coordinator@careroute.demo -d password=careroute-demo \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+curl -s localhost:8000/referrals/worklist?limit=3 -H "Authorization: Bearer $TOKEN"
+```
+
+Design decisions:
+
+- **The audit trail is tamper-resistant.** `referral_events.actor` is the
+  authenticated user's email. Request bodies carry no `actor` field, and one
+  sent anyway is ignored, so nobody can record a change under someone else's
+  name.
+- **Revocation is immediate.** Each request re-reads the user's role and
+  `is_active` from the database instead of trusting the token's claims, so a
+  deactivated or demoted account loses access right away rather than when its
+  token expires.
+- **Login doesn't leak which emails exist.** Unknown email, wrong password and
+  inactive account all return the same 401, and an unknown email still runs a
+  full argon2 verify so response timing matches.
+- **Production can't start with the dev secret.** With `APP_ENV` set to
+  anything other than `local`/`test`, the app refuses to boot unless
+  `JWT_SECRET` is set. The seed script likewise refuses to run, since its demo
+  password is published right here.
 
 ---
 
@@ -128,6 +171,27 @@ docker compose -p careroute-test -f docker-compose.test.yml down -v
 `--build` matters: `run` reuses an already-tagged image if one exists, so
 without it a stale `careroute:test` image can silently run old code.
 
+Coverage is reported at the end of every run.
+
+Lint, format and type-check (pinned versions in `requirements-dev.txt`, config
+in `pyproject.toml`):
+
+```bash
+ruff check . && ruff format --check . && mypy app
+```
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+1. **Lint:** ruff, ruff format, and mypy
+2. **Test:** the same `docker-compose.test.yml` suite as above, plus an Alembic
+   `downgrade base` → `upgrade head` round-trip
+3. **Image:** builds the runtime stage and scans it with Trivy, failing the
+   build on any HIGH/CRITICAL vulnerability that has a fix available. On
+   `main` only, it then pushes the image to GHCR as
+   `ghcr.io/<owner>/<repo>:latest` and `:sha-<commit>`
+
 Test-only dependencies (`pytest`, `httpx`) live in `requirements-dev.txt`
 and a dedicated `test` Dockerfile stage — neither ships in the production
 image built by `docker compose build`.
@@ -144,7 +208,9 @@ exactly.
 docker compose exec api python scripts/seed.py
 ```
 
-Idempotent — re-running is a no-op. To wipe and reload:
+Idempotent — re-running is a no-op (apart from adding any missing demo
+users). Refuses to run unless `APP_ENV` is `local` or `test`. To wipe and
+reload:
 
 ```bash
 docker compose exec api python scripts/seed.py --reset
@@ -252,3 +318,10 @@ Everything above was executed against this stack, not assumed:
   assigning a provider with the wrong specialty, assigning one that isn't
   accepting new patients, and assigning to a referral that isn't open —
   all return 409
+- Auth against the live stack: no token → 401, bad password → 401, viewer
+  write → 403, clinician assign → 403, coordinator assign → 200. A referral
+  submitted with `"actor": "spoofed"` in the body recorded the clinician's
+  real email in its history
+- Adding `users` to an already-seeded database: migration applied, demo users
+  added, and all five pre-existing table fingerprints unchanged
+- Test suite: 63 tests, 99% line coverage of `app/`

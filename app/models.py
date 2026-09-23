@@ -2,7 +2,8 @@
 
 The care-routing problem in five tables: patients are referred out of an
 origin facility, a referral is routed to a provider, and every status change
-is appended to an immutable event log.
+is appended to an immutable event log. A sixth table, `users`, holds the
+staff accounts that authenticate against the API.
 
 These models are the single source of truth for the schema. Never edit the
 database by hand — change a model, then run:
@@ -52,6 +53,14 @@ class ReferralPriority(str, enum.Enum):
     EMERGENT = "emergent"
 
 
+class UserRole(str, enum.Enum):
+    """What a staff account may do. See app/auth.py for the permission map."""
+
+    VIEWER = "viewer"
+    CLINICIAN = "clinician"
+    COORDINATOR = "coordinator"
+
+
 # Shared Enum type objects. `referral_status` is used by three columns across
 # two tables; reusing one instance is what makes SQLAlchemy and Alembic emit a
 # single CREATE TYPE instead of one per column.
@@ -68,6 +77,12 @@ REFERRAL_STATUS = Enum(
 REFERRAL_PRIORITY = Enum(
     ReferralPriority,
     name="referral_priority",
+    native_enum=True,
+    values_callable=lambda cls: [m.value for m in cls],
+)
+USER_ROLE = Enum(
+    UserRole,
+    name="user_role",
     native_enum=True,
     values_callable=lambda cls: [m.value for m in cls],
 )
@@ -213,4 +228,32 @@ class ReferralEvent(Base):
 
     __table_args__ = (
         Index("ix_referral_events_referral_time", "referral_id", "occurred_at"),
+    )
+
+
+class User(Base):
+    """A staff account that authenticates against the API.
+
+    `email` is what gets written to referral_events.actor, so the audit trail
+    records who made a change from their verified identity rather than from
+    whatever a client chose to put in a request body.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # argon2id hash — never the password itself.
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(USER_ROLE, nullable=False)
+    is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    # Login lowercases the submitted email; the database guarantees every
+    # stored one matches, so lookup is a plain equality on the unique index.
+    __table_args__ = (
+        CheckConstraint("email = lower(email)", name="ck_users_email_lowercase"),
     )

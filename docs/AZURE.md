@@ -113,6 +113,20 @@ a container App Setting, or better, store it in Key Vault and reference it.
 drops idle connections, and without pre-ping the first request after an idle
 period fails on a stale connection.
 
+### JWT signing secret
+
+The API also needs `JWT_SECRET` and a non-dev `APP_ENV` (e.g. `production`).
+With any `APP_ENV` other than `local`/`test`, the app **refuses to start** if
+`JWT_SECRET` is left at its built-in development default. Generate one and store
+it in Key Vault alongside the connection string:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+`scripts/seed.py` also refuses to run outside `local`/`test`, because it creates
+demo logins with a published password.
+
 ---
 
 ## Running migrations against Azure

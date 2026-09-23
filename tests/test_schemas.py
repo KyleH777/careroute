@@ -26,7 +26,6 @@ def test_referral_create_defaults_priority_to_routine():
         patient_id=1,
         origin_facility_id=1,
         specialty_requested="Cardiology",
-        actor="dr.test",
     )
     assert referral.priority == ReferralPriority.ROUTINE
 
@@ -37,6 +36,5 @@ def test_referral_create_rejects_invalid_priority():
             patient_id=1,
             origin_facility_id=1,
             specialty_requested="Cardiology",
-            actor="dr.test",
             priority="not-a-real-priority",
         )

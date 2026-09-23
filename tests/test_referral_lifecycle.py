@@ -23,7 +23,6 @@ def test_full_referral_lifecycle(client, facility, provider):
             "specialty_requested": "Cardiology",
             "priority": "urgent",
             "reason": "abnormal EKG",
-            "actor": "dr.intake",
         },
     )
     assert referral_response.status_code == 201
@@ -33,13 +32,13 @@ def test_full_referral_lifecycle(client, facility, provider):
 
     submit_response = client.post(
         f"/referrals/{referral_id}/status",
-        json={"to_status": "submitted", "actor": "dr.intake"},
+        json={"to_status": "submitted"},
     )
     assert submit_response.status_code == 200
 
     assign_response = client.post(
         f"/referrals/{referral_id}/assign",
-        json={"provider_id": provider.id, "actor": "router"},
+        json={"provider_id": provider.id},
     )
     assert assign_response.status_code == 200
     assert assign_response.json()["assigned_provider_id"] == provider.id
@@ -47,7 +46,7 @@ def test_full_referral_lifecycle(client, facility, provider):
     for to_status in ("accepted", "scheduled", "completed"):
         transition = client.post(
             f"/referrals/{referral_id}/status",
-            json={"to_status": to_status, "actor": "dr.specialist"},
+            json={"to_status": to_status},
         )
         assert transition.status_code == 200, transition.json()
         assert transition.json()["status"] == to_status

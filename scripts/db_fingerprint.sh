@@ -24,5 +24,7 @@ docker compose exec -T "$DB_SERVICE" psql -U "$DB_USER" -d "$DB_NAME" -t -A -c "
   UNION ALL
   SELECT 'referrals       ' || md5(string_agg(t::text, '|' ORDER BY id)) FROM referrals t
   UNION ALL
-  SELECT 'referral_events ' || md5(string_agg(t::text, '|' ORDER BY id)) FROM referral_events t;
+  SELECT 'referral_events ' || md5(string_agg(t::text, '|' ORDER BY id)) FROM referral_events t
+  UNION ALL
+  SELECT 'users           ' || md5(string_agg(t::text, '|' ORDER BY id)) FROM users t;
 "

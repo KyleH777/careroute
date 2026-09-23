@@ -10,6 +10,10 @@ data. That is what makes the backup/restore drill verifiable — you can compare
 row counts and checksums before and after a restore and expect an exact match.
 
 Idempotent: re-running without --reset is a no-op rather than a duplicate load.
+
+Also creates one demo login per role (see DEMO_USERS), all sharing
+DEMO_PASSWORD. Because those credentials are published in the README, the
+script refuses to run unless APP_ENV is local or test.
 """
 
 from __future__ import annotations
@@ -25,6 +29,8 @@ from sqlalchemy import func, select, text
 # Make `app` importable when run as `python scripts/seed.py`.
 sys.path.insert(0, "/home/app")
 
+from app.auth import hash_password
+from app.config import settings
 from app.db import SessionLocal
 from app.models import (
     Facility,
@@ -34,6 +40,8 @@ from app.models import (
     ReferralEvent,
     ReferralPriority,
     ReferralStatus,
+    User,
+    UserRole,
 )
 
 RANDOM_SEED = 42
@@ -97,6 +105,15 @@ LAST_NAMES = [
 TERMINAL = {ReferralStatus.COMPLETED, ReferralStatus.CANCELLED, ReferralStatus.REJECTED}
 
 
+# Demo logins, one per role. Documented in the README; dev/test only.
+DEMO_PASSWORD = "careroute-demo"
+DEMO_USERS = [
+    ("viewer@careroute.demo", "Vera Viewer", UserRole.VIEWER),
+    ("clinician@careroute.demo", "Cal Clinician", UserRole.CLINICIAN),
+    ("coordinator@careroute.demo", "Cora Coordinator", UserRole.COORDINATOR),
+]
+
+
 def _name(rng: random.Random) -> str:
     return f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
 
@@ -106,8 +123,8 @@ def reset(session) -> None:
     log.info("resetting seeded tables")
     session.execute(
         text(
-            "TRUNCATE referral_events, referrals, patients, providers, facilities "
-            "RESTART IDENTITY CASCADE"
+            "TRUNCATE referral_events, referrals, patients, providers, facilities, "
+            "users RESTART IDENTITY CASCADE"
         )
     )
     session.commit()
@@ -115,6 +132,27 @@ def reset(session) -> None:
 
 def already_seeded(session) -> bool:
     return session.scalar(select(func.count()).select_from(Facility)) > 0
+
+
+def ensure_demo_users(session) -> int:
+    """Create any missing DEMO_USERS; return how many were added.
+
+    Separate from seed() and run on every invocation, so a database seeded
+    before the users table existed still gets its demo logins.
+    """
+    existing = set(session.scalars(select(User.email)))
+    missing = [u for u in DEMO_USERS if u[0] not in existing]
+    session.add_all(
+        User(
+            email=email,
+            full_name=name,
+            password_hash=hash_password(DEMO_PASSWORD),
+            role=role,
+        )
+        for email, name, role in missing
+    )
+    session.commit()
+    return len(missing)
 
 
 def seed(session) -> dict[str, int]:
@@ -260,14 +298,28 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if settings.app_env not in ("local", "test"):
+        log.error(
+            "refusing to seed APP_ENV=%r: this creates demo logins with a "
+            "published password",
+            settings.app_env,
+        )
+        return 1
+
     with SessionLocal() as session:
         if args.reset:
             reset(session)
         elif already_seeded(session):
-            log.info("database already seeded; nothing to do (use --reset to reload)")
+            added = ensure_demo_users(session)
+            log.info(
+                "database already seeded; added %d missing demo user(s) "
+                "(use --reset to reload everything)",
+                added,
+            )
             return 0
 
         counts = seed(session)
+        counts["users"] = ensure_demo_users(session)
 
     for table, n in counts.items():
         log.info("seeded %-16s %d rows", table, n)

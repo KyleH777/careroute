@@ -3,6 +3,9 @@
 Separate from app/models.py (the SQLAlchemy ORM layer): these describe the
 HTTP contract, not the database schema. `Out` models read straight off ORM
 instances via `from_attributes=True`.
+
+No request model carries an `actor`: who made a change comes from the
+authenticated user (app/auth.py), never from the request body.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models import ReferralPriority, ReferralStatus
+from app.models import ReferralPriority, ReferralStatus, UserRole
 
 
 class PatientCreate(BaseModel):
@@ -40,7 +43,6 @@ class ReferralCreate(BaseModel):
     specialty_requested: str
     priority: ReferralPriority = ReferralPriority.ROUTINE
     reason: str | None = None
-    actor: str
 
 
 class ReferralOut(BaseModel):
@@ -74,11 +76,24 @@ class ReferralWithEvents(ReferralOut):
 
 class ReferralAssignRequest(BaseModel):
     provider_id: int
-    actor: str
     note: str | None = None
 
 
 class ReferralStatusRequest(BaseModel):
     to_status: ReferralStatus
-    actor: str
     note: str | None = None
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    full_name: str
+    role: UserRole

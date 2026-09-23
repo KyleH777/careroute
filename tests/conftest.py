@@ -4,6 +4,11 @@ Runs against the ephemeral Postgres started by docker-compose.test.yml.
 `clean_tables` is autouse so every test starts with empty tables — no test
 depends on another test's data, and none of this touches the dev stack's
 seeded database (a separate container entirely).
+
+`client` is authenticated as a coordinator (the role allowed to do
+everything), so endpoint tests exercise business rules without repeating
+auth setup. Auth itself — 401s, 403s, the role matrix — is covered in
+test_auth.py via `anon_client` and `client_as`.
 """
 
 from datetime import date
@@ -12,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from app.auth import create_access_token, hash_password
 from app.db import SessionLocal, engine
 from app.main import app
 from app.models import (
@@ -21,7 +27,12 @@ from app.models import (
     Referral,
     ReferralPriority,
     ReferralStatus,
+    User,
+    UserRole,
 )
+
+TEST_PASSWORD = "correct-horse-battery-staple"
+COORDINATOR_EMAIL = "coordinator@test.careroute"
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +41,7 @@ def clean_tables():
         conn.execute(
             text(
                 "TRUNCATE TABLE referral_events, referrals, patients, "
-                "providers, facilities RESTART IDENTITY CASCADE"
+                "providers, facilities, users RESTART IDENTITY CASCADE"
             )
         )
 
@@ -43,7 +54,43 @@ def db():
 
 
 @pytest.fixture()
-def client():
+def make_user(db):
+    """Factory: persist a user with the given role and TEST_PASSWORD."""
+
+    def _make(role: UserRole, email: str | None = None, **kwargs) -> User:
+        user = User(
+            email=email or f"{role.value}@test.careroute",
+            full_name=f"Test {role.value.title()}",
+            password_hash=hash_password(TEST_PASSWORD),
+            role=role,
+            **kwargs,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+    return _make
+
+
+@pytest.fixture()
+def client_as(make_user):
+    """Factory: a TestClient carrying a bearer token for a new user of `role`."""
+
+    def _client(role: UserRole) -> TestClient:
+        token = create_access_token(make_user(role))
+        return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+
+    return _client
+
+
+@pytest.fixture()
+def client(client_as):
+    return client_as(UserRole.COORDINATOR)
+
+
+@pytest.fixture()
+def anon_client():
     return TestClient(app)
 
 

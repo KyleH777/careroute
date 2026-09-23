@@ -6,7 +6,7 @@ from app.models import Provider, Referral, ReferralPriority, ReferralStatus
 def test_assign_sets_provider_on_open_referral(client, submitted_referral, provider):
     response = client.post(
         f"/referrals/{submitted_referral.id}/assign",
-        json={"provider_id": provider.id, "actor": "router"},
+        json={"provider_id": provider.id},
     )
     assert response.status_code == 200
     assert response.json()["assigned_provider_id"] == provider.id
@@ -15,7 +15,7 @@ def test_assign_sets_provider_on_open_referral(client, submitted_referral, provi
 def test_assign_404s_for_missing_referral(client, provider):
     response = client.post(
         "/referrals/999999/assign",
-        json={"provider_id": provider.id, "actor": "router"},
+        json={"provider_id": provider.id},
     )
     assert response.status_code == 404
 
@@ -23,7 +23,7 @@ def test_assign_404s_for_missing_referral(client, provider):
 def test_assign_404s_for_missing_provider(client, submitted_referral):
     response = client.post(
         f"/referrals/{submitted_referral.id}/assign",
-        json={"provider_id": 999999, "actor": "router"},
+        json={"provider_id": 999999},
     )
     assert response.status_code == 404
 
@@ -42,7 +42,7 @@ def test_assign_409s_when_referral_not_open(client, db, facility, patient, provi
 
     response = client.post(
         f"/referrals/{draft_referral.id}/assign",
-        json={"provider_id": provider.id, "actor": "router"},
+        json={"provider_id": provider.id},
     )
     assert response.status_code == 409
 
@@ -61,7 +61,7 @@ def test_assign_409s_on_specialty_mismatch(client, db, submitted_referral, facil
 
     response = client.post(
         f"/referrals/{submitted_referral.id}/assign",
-        json={"provider_id": mismatched_provider.id, "actor": "router"},
+        json={"provider_id": mismatched_provider.id},
     )
     assert response.status_code == 409
 
@@ -82,6 +82,6 @@ def test_assign_409s_when_provider_not_accepting(
 
     response = client.post(
         f"/referrals/{submitted_referral.id}/assign",
-        json={"provider_id": full_provider.id, "actor": "router"},
+        json={"provider_id": full_provider.id},
     )
     assert response.status_code == 409
