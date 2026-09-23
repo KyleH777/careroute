@@ -1,20 +1,26 @@
 # syntax=docker/dockerfile:1
 
+# Base images are Docker Hardened Images (https://dhi.io): minimal Debian 13
+# builds with no known HIGH/CRITICAL CVEs at release, rebuilt as fixes land.
+#
+#   *-dev   has a shell and package tooling — used only to build the venv
+#   runtime has no shell, no package manager, and runs as uid 65532
+#
+# Both share the same interpreter at /usr/bin/python3.12, which is what lets
+# a venv built in one run unchanged in the other (a venv's python is a
+# symlink to the interpreter that created it).
+ARG PYTHON_IMAGE=dhi.io/python:3.12-debian13
+
 # ============================================================
 # Stage 1: builder — installs dependencies into a virtualenv.
-# Build tools (compilers, headers) live ONLY here and never
-# reach the final image.
+# Every dependency ships a prebuilt manylinux wheel, so no
+# compilers are needed.
 # ============================================================
-FROM python:3.12-slim AS builder
-
-# Build tools for any deps that compile C extensions (numpy, etc.)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
+FROM ${PYTHON_IMAGE}-dev AS builder
 
 # Isolated venv so the runtime stage can copy one clean directory
 ENV VIRTUAL_ENV=/opt/venv
-RUN python -m venv $VIRTUAL_ENV
+RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /build
@@ -23,32 +29,15 @@ WORKDIR /build
 # until requirements.txt changes, so code edits don't re-install deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --only-binary=:all: -r requirements.txt \
     && pip uninstall -y pip
 
 # ============================================================
-# Stage 2: runtime — minimal image, only runtime artifacts.
-# No pip cache, no compilers, no source-control files.
+# Stage 2: runtime — hardened, shell-less, non-root.
+# There is no shell here, so this stage can have no RUN steps:
+# everything it needs is copied in.
 # ============================================================
-FROM python:3.12-slim AS runtime
-
-# Patch OS packages: the python:3.12-slim base image lags Debian's own repos,
-# which already carry fixes for critical CVEs in perl-base and libc6. This
-# picks up those fixes without waiting on an upstream image rebuild.
-RUN apt-get update \
-    && apt-get upgrade -y \
-    && rm -rf /var/lib/apt/lists/*
-
-# pip is never invoked at runtime (deps are already installed into the venv
-# we copy in below) but the base image ships its own system-Python pip, and
-# pip vendors old copies of msgpack/setuptools that scanners flag as
-# vulnerable. Removing it drops those findings entirely.
-RUN python3 -m pip uninstall -y pip 2>/dev/null; \
-    rm -rf /usr/local/lib/python3.12/site-packages/pip* \
-        /usr/local/bin/pip*
-
-# Never run as root inside the container
-RUN groupadd --system app && useradd --system --gid app --create-home app
+FROM ${PYTHON_IMAGE} AS runtime
 
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
@@ -58,46 +47,51 @@ ENV VIRTUAL_ENV=/opt/venv \
 # Runtime artifacts only: the installed deps, app code, and the migration
 # scripts. Migrations ship in the image so the exact code being deployed
 # carries the exact schema it expects.
+#
+# Files stay owned by root and the process runs as uid 65532, so the running
+# app cannot modify its own code or dependencies.
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /home/app
-COPY --chown=app:app app/ ./app/
-COPY --chown=app:app migrations/ ./migrations/
-COPY --chown=app:app scripts/ ./scripts/
-COPY --chown=app:app alembic.ini ./alembic.ini
+COPY app/ ./app/
+COPY migrations/ ./migrations/
+COPY scripts/ ./scripts/
+COPY alembic.ini ./alembic.ini
 
-USER app
+# The base image's non-root user; restated so the intent is visible here.
+USER 65532
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # ============================================================
 # Stage 3: test-deps — builder's venv plus dev/test-only
-# dependencies (pytest, httpx). Never published.
+# dependencies (pytest, httpx, ruff, mypy). Never published.
 # ============================================================
 FROM builder AS test-deps
 
-# builder already uninstalled pip from its venv (see Stage 1); bring it
-# back just long enough to install the dev dependencies below. ensurepip
-# only creates versioned pip3/pip3.12 scripts here (no plain `pip`), so a
-# bare `pip install` would silently fall through PATH to the base image's
-# system pip and install outside the venv — `python -m pip` is unambiguous.
+# builder uninstalled pip from its venv (see Stage 1); bring it back just
+# long enough to install the dev dependencies. `python -m pip` guarantees
+# the venv's pip rather than whichever `pip` PATH finds first.
 RUN python -m ensurepip --upgrade
 
 COPY requirements-dev.txt .
 RUN python -m pip install --no-cache-dir -r requirements-dev.txt
 
 # ============================================================
-# Stage 4: test — the runtime image plus test-deps' venv (adds
-# pytest/httpx) and the tests/ directory. Used only by the
-# `test` service in docker-compose.test.yml; never pushed.
+# Stage 4: test — the runtime image plus test-deps' venv and
+# the tests/ directory. Used only by docker-compose.test.yml.
 # ============================================================
 FROM runtime AS test
 
-COPY --from=test-deps --chown=app:app /opt/venv /opt/venv
-COPY --chown=app:app tests/ ./tests/
+COPY --from=test-deps /opt/venv /opt/venv
+COPY tests/ ./tests/
 
-CMD ["pytest", "-v"]
+# The code is root-owned and read-only to uid 65532 (as in runtime), so
+# pytest and coverage write their scratch files to /tmp instead.
+ENV COVERAGE_FILE=/tmp/.coverage
+
+CMD ["pytest", "-v", "-p", "no:cacheprovider"]

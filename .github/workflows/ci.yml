@@ -4,6 +4,11 @@
 # green CI run means exactly what a green local run means. The image is only
 # pushed to GHCR from main, and only if the Trivy scan finds no fixable
 # HIGH/CRITICAL vulnerabilities.
+#
+# Base images come from Docker Hardened Images (dhi.io), which requires a
+# Docker account to pull. Set two repository secrets:
+#   DOCKERHUB_USERNAME   your Docker Hub username
+#   DOCKERHUB_TOKEN      a Docker Hub personal access token (read-only is enough)
 
 name: CI
 
@@ -45,6 +50,12 @@ jobs:
       COMPOSE: docker compose -p careroute-test -f docker-compose.test.yml
     steps:
       - uses: actions/checkout@v5
+      - name: Log in to dhi.io (hardened base images)
+        uses: docker/login-action@v3
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Run pytest against ephemeral Postgres
         run: $COMPOSE run --build --rm test
       - name: Migration round-trip (downgrade base → upgrade head)
@@ -65,6 +76,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
+      - name: Log in to dhi.io (hardened base images)
+        uses: docker/login-action@v3
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Image tags
         id: meta
@@ -111,3 +128,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
+          # Provenance records the base image, which lets Docker Scout apply
+          # the hardened base's VEX statements to this image. SBOM lists
+          # every package for anyone auditing the published image.
+          provenance: mode=max
+          sbom: true

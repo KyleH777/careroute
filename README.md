@@ -4,11 +4,37 @@ FastAPI + Postgres 16, with JWT authentication and role-based access control,
 Alembic migrations, a deterministic seed dataset, a tested backup/restore
 drill, and a CI pipeline that lints, tests, scans and publishes the image.
 
-Multi-stage Docker build: the build stage installs dependencies into a
-virtualenv with compilers available, and the final stage copies only that
-virtualenv plus application code into a clean `python:3.12-slim` image. No
-compilers, no pip cache, no `.git` in the shipped image. Runs as a non-root
-`app` user.
+Multi-stage Docker build on [Docker Hardened Images](https://dhi.io). The
+build stage (`dhi.io/python:3.12-debian13-dev`) installs dependencies into a
+virtualenv; the runtime stage (`dhi.io/python:3.12-debian13`) receives only
+that virtualenv and the application code. The shipped image has **no shell,
+no package manager and no compilers**, runs as non-root uid 65532, and its
+code is root-owned, so the running process can't modify itself.
+
+Pulling from `dhi.io` needs a (free) Docker account: run `docker login dhi.io`
+once before the first build.
+
+### Image security
+
+| | `python:3.12-slim` (before) | Hardened image (now) |
+|---|---|---|
+| Size | 325 MB | 234 MB |
+| Shell / package manager | yes / yes | no / no |
+| CRITICAL / HIGH CVEs (Docker Scout) | 0 / 2, no fix available | **0 / 0** |
+
+The HIGH count comes from Docker Scout with the base image's VEX statements
+applied. Those are Docker's published analysis of which CVEs actually affect the
+hardened image. Without them, Scout lists six HIGHs in the base (zlib, expat,
+libpython, and libraries vendored inside the base image's pip), all marked
+`not_affected` by that VEX. To reproduce:
+
+```bash
+docker scout vex get dhi.io/python:3.12-debian13 --output dhi-vex.json
+docker scout cves careroute:local --vex-location dhi-vex.json
+```
+
+The image CI publishes carries a provenance attestation naming its base image,
+which is what lets Scout apply those statements automatically.
 
 ## Start everything
 
@@ -114,7 +140,7 @@ Design decisions:
   inactive account all return the same 401, and an unknown email still runs a
   full argon2 verify so response timing matches.
 - **Production can't start with the dev secret.** With `APP_ENV` set to
-  anything other than `local`/`test`, the app refuses to boot unless
+  anything other than `local`/`dev`/`test`, the app refuses to boot unless
   `JWT_SECRET` is set. The seed script likewise refuses to run, since its demo
   password is published right here.
 
@@ -209,7 +235,7 @@ docker compose exec api python scripts/seed.py
 ```
 
 Idempotent — re-running is a no-op (apart from adding any missing demo
-users). Refuses to run unless `APP_ENV` is `local` or `test`. To wipe and
+users). Refuses to run unless `APP_ENV` is `local`, `dev` or `test`. To wipe and
 reload:
 
 ```bash
@@ -280,11 +306,14 @@ Status and health:
 docker compose ps
 ```
 
-Shell into the api container:
+There is no shell in the api container, on purpose. Run Python directly:
 
 ```bash
-docker compose exec api /bin/bash
+docker compose exec api python -c "import app.main; print('ok')"
 ```
+
+For interactive debugging, `docker debug careroute-api` attaches a toolbox
+shell without adding one to the image.
 
 psql into the database:
 
@@ -304,7 +333,12 @@ docker compose build --no-cache
 
 Everything above was executed against this stack, not assumed:
 
-- Image builds clean; final image runs as non-root and contains only runtime artifacts
+- Image builds clean; final image runs as uid 65532 with no shell (`exec api id`
+  fails: no such executable) and contains only runtime artifacts
+- 0 CRITICAL / 0 HIGH in Docker Scout with the base VEX applied; Trivy finds 0
+  fixable HIGH/CRITICAL
+- Dev overlay (`APP_ENV=dev`) boots with the default JWT secret; any other
+  non-dev `APP_ENV` refuses to
 - Compose ordering works — api waits for migrations to complete successfully
 - Migration applies, and round-trips through `downgrade base` → `upgrade head`
 - Seed loads 1,451 rows across five tables and is idempotent on re-run
