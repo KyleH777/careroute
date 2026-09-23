@@ -75,6 +75,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v5
+      # QEMU lets the amd64 runner also build the arm64 image (Apple Silicon,
+      # Graviton). Only the publish step uses it; the scan runs on amd64.
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Log in to dhi.io (hardened base images)
         uses: docker/login-action@v3
@@ -124,6 +127,7 @@ jobs:
         with:
           context: .
           target: runtime
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
