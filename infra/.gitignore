@@ -1,0 +1,20 @@
+# Terraform working directory: providers and backend cache, rebuilt by `terraform init`.
+.terraform/
+
+# Local state should never exist (state lives in Azure Storage), but if a
+# stray one appears it can contain secrets, so it must not be committed.
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Variable files often hold secrets. Commit a *.tfvars.example instead.
+*.tfvars
+*.tfvars.json
+
+# Plan files embed full state, secrets included.
+*.tfplan
+
+# Kept in git on purpose:
+#   .terraform.lock.hcl   pins provider versions for everyone
+#   backend.hcl           storage account name only, no secrets

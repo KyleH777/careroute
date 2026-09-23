@@ -19,3 +19,6 @@ backups/
 Dockerfile
 .dockerignore
 docker-compose*.yml
+
+# Terraform lives outside the image
+infra/

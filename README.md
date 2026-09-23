@@ -292,6 +292,25 @@ object storage, never in version control.
 
 ---
 
+## Infrastructure as code (Terraform)
+
+Terraform state lives in Azure Storage, in its own resource group so tearing
+down the app can never delete it. The storage is bootstrapped with the Azure
+CLI, because Terraform can't create the storage that holds its own state:
+
+```bash
+az login
+./infra/backend-setup/setup-backend.sh     # shows the plan and asks before creating anything
+cd infra && terraform init -backend-config=backend.hcl
+```
+
+The state storage account uses Entra ID auth only (storage keys disabled),
+HTTPS/TLS 1.2, no public access, blob versioning with 30-day soft delete, and a
+delete lock. `infra/main.tf` configures the backend only; no infrastructure is
+declared yet.
+
+---
+
 ## Deploying to Azure
 
 Setup for Azure Database for PostgreSQL Flexible Server, including free-tier
