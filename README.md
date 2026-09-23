@@ -1,4 +1,4 @@
-# What the hell is this? 
+# What is this? 
 CareRoute is a backend API for healthcare referral routing. When a doctor
 refers a patient to a specialist, the referral has to be tracked, routed to
 the right provider, and audited. I built it with FastAPI and Postgres, fully
