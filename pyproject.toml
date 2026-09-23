@@ -1,0 +1,30 @@
+# Tool configuration only — CareRoute is deployed as a container, not
+# installed as a package. Runtime deps live in requirements.txt.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+# Alembic-generated revisions are kept byte-for-byte as generated.
+extend-exclude = ["migrations/versions", "docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+ignore = [
+    # `Depends(...)` in argument defaults is FastAPI's dependency-injection
+    # idiom, not the mutable-default bug B008 is designed to catch.
+    "B008",
+    # Line length is the formatter's job; it won't split long strings.
+    "E501",
+    # StrEnum changes str() output for the enums persisted to Postgres —
+    # a behavior change, not a lint fix.
+    "UP042",
+]
+
+[tool.mypy]
+python_version = "3.12"
+explicit_package_bases = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

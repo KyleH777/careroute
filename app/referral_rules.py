@@ -45,7 +45,10 @@ def validate_assignment(referral: Referral, provider: Provider) -> None:
         raise ReferralRuleViolation(
             f"referral is not open for assignment (status='{referral.status.value}')"
         )
-    if provider.specialty.strip().lower() != referral.specialty_requested.strip().lower():
+    if (
+        provider.specialty.strip().lower()
+        != referral.specialty_requested.strip().lower()
+    ):
         raise ReferralRuleViolation(
             f"provider specialty '{provider.specialty}' does not match "
             f"requested specialty '{referral.specialty_requested}'"

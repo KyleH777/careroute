@@ -1,2 +1,5 @@
 pytest==8.3.4
 httpx==0.28.1
+ruff==0.16.8
+mypy==1.18.2
+pytest-cov==6.0.0

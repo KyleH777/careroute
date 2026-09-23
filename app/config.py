@@ -16,9 +16,7 @@ class Settings(BaseSettings):
     app_env: str = "local"
 
     # SQLAlchemy URL. Uses the psycopg (v3) driver.
-    database_url: str = (
-        "postgresql+psycopg://careroute:careroute@db:5432/careroute"
-    )
+    database_url: str = "postgresql+psycopg://careroute:careroute@db:5432/careroute"
 
     # Verify connections before handing them out. Azure closes idle
     # connections, and without this the first request after an idle period

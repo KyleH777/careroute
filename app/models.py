@@ -116,7 +116,9 @@ class Provider(Base):
 
     __table_args__ = (
         CheckConstraint("npi ~ '^[0-9]{10}$'", name="ck_providers_npi_10_digits"),
-        Index("ix_providers_specialty_accepting", "specialty", "accepting_new_patients"),
+        Index(
+            "ix_providers_specialty_accepting", "specialty", "accepting_new_patients"
+        ),
     )
 
 
@@ -173,14 +175,18 @@ class Referral(Base):
     )
 
     patient: Mapped[Patient] = relationship(back_populates="referrals")
-    assigned_provider: Mapped[Provider | None] = relationship(back_populates="referrals")
+    assigned_provider: Mapped[Provider | None] = relationship(
+        back_populates="referrals"
+    )
     events: Mapped[list[ReferralEvent]] = relationship(
         back_populates="referral", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
         # The routing worklist query: open referrals by priority, oldest first.
-        Index("ix_referrals_status_priority_created", "status", "priority", "created_at"),
+        Index(
+            "ix_referrals_status_priority_created", "status", "priority", "created_at"
+        ),
         Index("ix_referrals_patient", "patient_id"),
     )
 
@@ -205,4 +211,6 @@ class ReferralEvent(Base):
 
     referral: Mapped[Referral] = relationship(back_populates="events")
 
-    __table_args__ = (Index("ix_referral_events_referral_time", "referral_id", "occurred_at"),)
+    __table_args__ = (
+        Index("ix_referral_events_referral_time", "referral_id", "occurred_at"),
+    )

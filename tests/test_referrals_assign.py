@@ -66,7 +66,9 @@ def test_assign_409s_on_specialty_mismatch(client, db, submitted_referral, facil
     assert response.status_code == 409
 
 
-def test_assign_409s_when_provider_not_accepting(client, db, submitted_referral, facility):
+def test_assign_409s_when_provider_not_accepting(
+    client, db, submitted_referral, facility
+):
     full_provider = Provider(
         facility_id=facility.id,
         npi="8888888888",

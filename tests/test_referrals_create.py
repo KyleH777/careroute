@@ -59,9 +59,7 @@ def test_create_referral_writes_initial_draft_event(client, facility, patient, d
     )
     referral_id = response.json()["id"]
     events = (
-        db.query(ReferralEvent)
-        .filter(ReferralEvent.referral_id == referral_id)
-        .all()
+        db.query(ReferralEvent).filter(ReferralEvent.referral_id == referral_id).all()
     )
     assert len(events) == 1
     assert events[0].from_status is None

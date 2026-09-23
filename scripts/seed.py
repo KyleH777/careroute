@@ -18,15 +18,15 @@ import argparse
 import logging
 import random
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select, text
 
 # Make `app` importable when run as `python scripts/seed.py`.
 sys.path.insert(0, "/home/app")
 
-from app.db import SessionLocal  # noqa: E402
-from app.models import (  # noqa: E402
+from app.db import SessionLocal
+from app.models import (
     Facility,
     Patient,
     Provider,
@@ -59,12 +59,38 @@ SPECIALTIES = [
 ]
 
 FIRST_NAMES = [
-    "Avery", "Jordan", "Riley", "Quinn", "Morgan", "Casey", "Rowan", "Skyler",
-    "Emerson", "Finley", "Hayden", "Kendall", "Logan", "Parker", "Reese",
+    "Avery",
+    "Jordan",
+    "Riley",
+    "Quinn",
+    "Morgan",
+    "Casey",
+    "Rowan",
+    "Skyler",
+    "Emerson",
+    "Finley",
+    "Hayden",
+    "Kendall",
+    "Logan",
+    "Parker",
+    "Reese",
 ]
 LAST_NAMES = [
-    "Alvarez", "Boyd", "Chen", "Duarte", "Ellis", "Fowler", "Gagnon", "Haddad",
-    "Ibrahim", "Jensen", "Kowalski", "Lindqvist", "Mbeki", "Nakamura", "Okonkwo",
+    "Alvarez",
+    "Boyd",
+    "Chen",
+    "Duarte",
+    "Ellis",
+    "Fowler",
+    "Gagnon",
+    "Haddad",
+    "Ibrahim",
+    "Jensen",
+    "Kowalski",
+    "Lindqvist",
+    "Mbeki",
+    "Nakamura",
+    "Okonkwo",
 ]
 
 # Terminal states never appear as a from_status in a later event.
@@ -94,7 +120,7 @@ def already_seeded(session) -> bool:
 def seed(session) -> dict[str, int]:
     """Insert the dataset and return per-table row counts."""
     rng = random.Random(RANDOM_SEED)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     facilities = [
         Facility(name=f"{city} Community Health", city=city, state=st, timezone=tz)
@@ -155,9 +181,7 @@ def seed(session) -> dict[str, int]:
             origin_facility_id=rng.choice(facilities).id,
             assigned_provider_id=assigned.id if assigned else None,
             status=status,
-            priority=rng.choices(
-                list(ReferralPriority), weights=[70, 25, 5], k=1
-            )[0],
+            priority=rng.choices(list(ReferralPriority), weights=[70, 25, 5], k=1)[0],
             specialty_requested=specialty,
             reason=f"Routine referral #{i} for {specialty.lower()} evaluation.",
             created_at=created,
@@ -172,21 +196,32 @@ def seed(session) -> dict[str, int]:
         ReferralStatus.DRAFT: [ReferralStatus.DRAFT],
         ReferralStatus.SUBMITTED: [ReferralStatus.DRAFT, ReferralStatus.SUBMITTED],
         ReferralStatus.ACCEPTED: [
-            ReferralStatus.DRAFT, ReferralStatus.SUBMITTED, ReferralStatus.ACCEPTED
+            ReferralStatus.DRAFT,
+            ReferralStatus.SUBMITTED,
+            ReferralStatus.ACCEPTED,
         ],
         ReferralStatus.SCHEDULED: [
-            ReferralStatus.DRAFT, ReferralStatus.SUBMITTED,
-            ReferralStatus.ACCEPTED, ReferralStatus.SCHEDULED,
+            ReferralStatus.DRAFT,
+            ReferralStatus.SUBMITTED,
+            ReferralStatus.ACCEPTED,
+            ReferralStatus.SCHEDULED,
         ],
         ReferralStatus.COMPLETED: [
-            ReferralStatus.DRAFT, ReferralStatus.SUBMITTED, ReferralStatus.ACCEPTED,
-            ReferralStatus.SCHEDULED, ReferralStatus.COMPLETED,
+            ReferralStatus.DRAFT,
+            ReferralStatus.SUBMITTED,
+            ReferralStatus.ACCEPTED,
+            ReferralStatus.SCHEDULED,
+            ReferralStatus.COMPLETED,
         ],
         ReferralStatus.CANCELLED: [
-            ReferralStatus.DRAFT, ReferralStatus.SUBMITTED, ReferralStatus.CANCELLED
+            ReferralStatus.DRAFT,
+            ReferralStatus.SUBMITTED,
+            ReferralStatus.CANCELLED,
         ],
         ReferralStatus.REJECTED: [
-            ReferralStatus.DRAFT, ReferralStatus.SUBMITTED, ReferralStatus.REJECTED
+            ReferralStatus.DRAFT,
+            ReferralStatus.SUBMITTED,
+            ReferralStatus.REJECTED,
         ],
     }
     for ref in referrals:

@@ -49,6 +49,7 @@ def handle_referral_rule_violation(
         status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc)}
     )
 
+
 # Tables the /stats endpoint reports on, in dependency order.
 _COUNTED = {
     "facilities": Facility,
@@ -75,7 +76,11 @@ def ready(session: Session = Depends(get_session)) -> dict[str, str]:
     try:
         session.execute(select(1))
     except SQLAlchemyError as exc:
-        return {"status": "degraded", "database": "unreachable", "detail": str(exc)[:200]}
+        return {
+            "status": "degraded",
+            "database": "unreachable",
+            "detail": str(exc)[:200],
+        }
     return {"status": "ok", "database": "reachable", "env": settings.app_env}
 
 
