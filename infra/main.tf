@@ -1,7 +1,5 @@
-# CareRoute infrastructure.
-#
-# Only the Terraform/backend configuration lives here so far. No resources are
-# declared, so `terraform plan` will propose no changes.
+# CareRoute infrastructure: the API on Azure Container Apps, Postgres Flexible
+# Server on a private network, secrets in Key Vault.
 #
 # State is stored remotely in Azure Storage, created beforehand by
 # backend-setup/setup-backend.sh (Terraform can't create the storage that
@@ -9,7 +7,13 @@
 #
 #   az login
 #   ./backend-setup/setup-backend.sh
+#   export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 #   terraform init -backend-config=backend.hcl
+#   terraform plan -out=careroute.tfplan
+#   terraform apply careroute.tfplan
+#
+# Resources are split by concern: network.tf, database.tf, keyvault.tf,
+# containerapps.tf. Inputs in variables.tf, outputs in outputs.tf.
 
 terraform {
   required_version = ">= 1.6.0"
@@ -18,6 +22,14 @@ terraform {
     azurerm = {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
     }
   }
 
@@ -36,4 +48,41 @@ terraform {
     # storage account keys; the setup script disables key access entirely.
     use_azuread_auth = true
   }
+}
+
+# Subscription comes from ARM_SUBSCRIPTION_ID (azurerm v4 requires it to be
+# explicit rather than silently using the CLI's current default).
+provider "azurerm" {
+  features {
+    key_vault {
+      # Destroying the vault soft-deletes it; don't also purge, so an
+      # accidental destroy is recoverable for the retention period.
+      purge_soft_delete_on_destroy = false
+    }
+  }
+}
+
+data "azurerm_client_config" "current" {}
+
+locals {
+  name = "careroute"
+  tags = {
+    project    = "careroute"
+    managed-by = "terraform"
+  }
+}
+
+# Short random suffix for names that must be globally unique (Key Vault).
+resource "random_string" "suffix" {
+  length  = 6
+  lower   = true
+  upper   = false
+  numeric = true
+  special = false
+}
+
+resource "azurerm_resource_group" "app" {
+  name     = "${local.name}-rg"
+  location = var.location
+  tags     = local.tags
 }
