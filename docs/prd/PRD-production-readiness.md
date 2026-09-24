@@ -46,6 +46,9 @@ answer "who saw what" during an incident.
   status, DB pool stats); not publicly exposed on Azure.
 - R3.3 An Azure Monitor alert when `/ready` fails or 5xx rate spikes,
   notifying the owner. Addresses "no monitoring or alerting".
+- R3.4 Application and audit logs retained centrally (Log Analytics) for a
+  defined period, independent of container lifetime. Addresses "no central
+  log retention" (incident evidence currently disappears with the container).
 
 ### R4: Login hardening
 - R4.1 Rate limit `/auth/token` per client IP and per account; 429 with
@@ -65,6 +68,17 @@ answer "who saw what" during an incident.
 
 ### R7: API polish
 - R7.1 Cursor pagination on `/referrals/worklist`.
+
+### R8: Operations docs match the deployed system
+- R8.1 `docs/AZURE.md` describes the Terraform deployment as built:
+  centralus, private (VNet-injected) Postgres with no firewall rules,
+  secrets generated into Key Vault, migrations/seeding via Container Apps
+  Jobs. Remove the ad-hoc `az` provisioning path and hand-typed secrets.
+- R8.2 `docs/RUNBOOK.md` Azure procedures match: no firewall-rule check;
+  secret rotation through Terraform/Key Vault; Azure equivalents for
+  logs, migrations and restores (in-VNet job instead of laptop access).
+- R8.3 `docs/INCIDENT-RESPONSE.md` credential rotation steps point at the
+  Key Vault / Terraform path.
 
 ## Out of scope
 
