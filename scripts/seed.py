@@ -11,15 +11,25 @@ row counts and checksums before and after a restore and expect an exact match.
 
 Idempotent: re-running without --reset is a no-op rather than a duplicate load.
 
-Also creates one demo login per role (see DEMO_USERS), all sharing
-DEMO_PASSWORD. Because those credentials are published in the README, the
-script refuses to run unless APP_ENV is local, dev or test.
+Also creates one demo login per role (see DEMO_USERS). Password policy lives
+in demo_passwords():
+
+- local/dev/test: every demo user gets the published DEMO_PASSWORD.
+- anywhere else: refused, unless run with --demo-deployment. Then only the
+  read-only viewer gets the published password; clinician and coordinator
+  (who can write) take private passwords from DEMO_CLINICIAN_PASSWORD and
+  DEMO_COORDINATOR_PASSWORD, and --reset is refused outright.
+
+So a password that can change data is never published outside development.
+
+    python scripts/seed.py --demo-deployment      # e.g. the Azure seed job
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import random
 import sys
 from datetime import UTC, date, datetime, timedelta
@@ -114,6 +124,55 @@ DEMO_USERS = [
 ]
 
 
+# Minimum length for the private (write-capable) demo passwords.
+MIN_PRIVATE_PASSWORD_LENGTH = 16
+_PRIVATE_PASSWORD_ENV = {
+    UserRole.CLINICIAN: "DEMO_CLINICIAN_PASSWORD",
+    UserRole.COORDINATOR: "DEMO_COORDINATOR_PASSWORD",
+}
+
+
+class SeedRefused(Exception):
+    """The seed would violate the demo-credential policy; nothing was written."""
+
+
+def demo_passwords(
+    app_env: str, demo_deployment: bool, environ: dict[str, str]
+) -> dict[str, str]:
+    """Return {email: password} for DEMO_USERS, or raise SeedRefused.
+
+    Pure: no database, no global state. See the module docstring for the
+    policy this enforces.
+    """
+    if app_env in DEV_ENVS:
+        return {email: DEMO_PASSWORD for email, _, _ in DEMO_USERS}
+
+    if not demo_deployment:
+        raise SeedRefused(
+            f"refusing to seed APP_ENV={app_env!r}: pass --demo-deployment to "
+            "seed a public demo (viewer gets the published password; "
+            "write-capable roles need private passwords)"
+        )
+
+    passwords: dict[str, str] = {}
+    for email, _, role in DEMO_USERS:
+        if role == UserRole.VIEWER:
+            passwords[email] = DEMO_PASSWORD
+            continue
+        var = _PRIVATE_PASSWORD_ENV[role]
+        value = environ.get(var, "")
+        if len(value) < MIN_PRIVATE_PASSWORD_LENGTH:
+            raise SeedRefused(
+                f"{var} must be set to at least {MIN_PRIVATE_PASSWORD_LENGTH} "
+                f"characters for a demo deployment ({role.value} can write data, "
+                "so its password is never the published one)"
+            )
+        if value == DEMO_PASSWORD:
+            raise SeedRefused(f"{var} must not be the published demo password")
+        passwords[email] = value
+    return passwords
+
+
 def _name(rng: random.Random) -> str:
     return f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
 
@@ -134,7 +193,7 @@ def already_seeded(session) -> bool:
     return session.scalar(select(func.count()).select_from(Facility)) > 0
 
 
-def ensure_demo_users(session) -> int:
+def ensure_demo_users(session, passwords: dict[str, str]) -> int:
     """Create any missing DEMO_USERS; return how many were added.
 
     Separate from seed() and run on every invocation, so a database seeded
@@ -146,7 +205,7 @@ def ensure_demo_users(session) -> int:
         User(
             email=email,
             full_name=name,
-            password_hash=hash_password(DEMO_PASSWORD),
+            password_hash=hash_password(passwords[email]),
             role=role,
         )
         for email, name, role in missing
@@ -296,21 +355,30 @@ def main() -> int:
     parser.add_argument(
         "--reset", action="store_true", help="truncate seeded tables before loading"
     )
+    parser.add_argument(
+        "--demo-deployment",
+        action="store_true",
+        help="allow seeding outside local/dev/test as a public read-only demo",
+    )
     args = parser.parse_args()
 
-    if settings.app_env not in DEV_ENVS:
-        log.error(
-            "refusing to seed APP_ENV=%r: this creates demo logins with a "
-            "published password",
-            settings.app_env,
+    try:
+        passwords = demo_passwords(
+            settings.app_env, args.demo_deployment, dict(os.environ)
         )
+    except SeedRefused as exc:
+        log.error("%s", exc)
+        return 1
+
+    if args.reset and settings.app_env not in DEV_ENVS:
+        log.error("refusing --reset outside local/dev/test: it wipes every table")
         return 1
 
     with SessionLocal() as session:
         if args.reset:
             reset(session)
         elif already_seeded(session):
-            added = ensure_demo_users(session)
+            added = ensure_demo_users(session, passwords)
             log.info(
                 "database already seeded; added %d missing demo user(s) "
                 "(use --reset to reload everything)",
@@ -319,7 +387,7 @@ def main() -> int:
             return 0
 
         counts = seed(session)
-        counts["users"] = ensure_demo_users(session)
+        counts["users"] = ensure_demo_users(session, passwords)
 
     for table, n in counts.items():
         log.info("seeded %-16s %d rows", table, n)
