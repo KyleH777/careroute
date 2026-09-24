@@ -1,0 +1,27 @@
+{
+  "source_path": "/Users/kyleharrington/Desktop/AI/Docker/CareRoute/docs/adr/0006-terraform-state-backend.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "ADR-0006: Terraform state in a separate, Entra-only storage account",
+  "summary": "Terraform state lives in a CLI-bootstrapped Azure Storage account in its own resource group, using Entra ID-only auth, versioning, soft delete, and a delete lock.",
+  "scope": [
+    "Terraform state backend",
+    "Azure Storage account",
+    "careroute-tfstate-rg resource group",
+    "careroute-rg resource group",
+    "infra/backend-setup/setup-backend.sh",
+    "backend.hcl partial backend config",
+    "Entra ID authentication",
+    "RBAC",
+    "blob versioning and soft delete",
+    "CanNotDelete resource lock"
+  ],
+  "cross_refs": [
+    "infra/backend-setup/setup-backend.sh",
+    "backend.hcl"
+  ],
+  "locked": true,
+  "precedence": null,
+  "notes": "Filename omits the -{source_hash} suffix: this agent has no shell access to compute SHA-256, so it follows the sibling 0001 file's naming. The numbered ADR slug is unique, so there is no collision risk."
+}

@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/kyleharrington/Desktop/AI/Docker/CareRoute/docs/adr/0004-audit-actor-from-token.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "ADR-0004: Audit trail actor comes from the authenticated identity",
+  "summary": "The actor in referral_events is now set from the authenticated user's email instead of a client-supplied field, so status-change audit records can't be spoofed.",
+  "scope": ["referral_events", "audit trail", "actor field", "authentication", "referral status changes", "Pydantic request models"],
+  "cross_refs": ["INCIDENT-RESPONSE.md"],
+  "locked": true,
+  "precedence": null,
+  "notes": "Output filename omits the SHA-256 path-hash suffix: this agent has no shell/hash tool, so it follows the convention of sibling file 0001-one-shot-migration-before-api.json. The filename is unique within docs/adr/."
+}

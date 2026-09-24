@@ -1,0 +1,26 @@
+# Ingest manifest: ADRs + PRD only.
+# Excluded: ops docs (AZURE, BACKUP-RESTORE, RUNBOOK, INCIDENT-RESPONSE), whose
+# mutual "see also" links form cross-ref cycles and which describe operation,
+# not scope; their stale Azure content is tracked as PRD R8. Also excluded:
+# the ADR index and the shipped superpowers plan/spec.
+docs:
+  - path: docs/adr/0001-one-shot-migration-before-api.md
+    type: ADR
+  - path: docs/adr/0002-separate-liveness-and-readiness.md
+    type: ADR
+  - path: docs/adr/0003-jwt-with-per-request-user-check.md
+    type: ADR
+  - path: docs/adr/0004-audit-actor-from-token.md
+    type: ADR
+  - path: docs/adr/0005-docker-hardened-images.md
+    type: ADR
+  - path: docs/adr/0006-terraform-state-backend.md
+    type: ADR
+  - path: docs/adr/0007-private-postgres-in-centralus.md
+    type: ADR
+  - path: docs/adr/0008-secrets-generated-into-key-vault.md
+    type: ADR
+  - path: docs/adr/0009-read-only-public-demo.md
+    type: ADR
+  - path: docs/prd/PRD-production-readiness.md
+    type: PRD

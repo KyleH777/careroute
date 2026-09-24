@@ -1,0 +1,24 @@
+{
+  "source_path": "/Users/kyleharrington/Desktop/AI/Docker/CareRoute/docs/adr/0009-read-only-public-demo.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "ADR-0009: Public demo exposes only a read-only login",
+  "summary": "Public demo seeding publishes only the viewer account's password; clinician and coordinator use private Key Vault passwords, and reset is refused outside dev.",
+  "scope": [
+    "seed script",
+    "--demo-deployment flag",
+    "viewer@careroute.demo account",
+    "DEMO_CLINICIAN_PASSWORD",
+    "DEMO_COORDINATOR_PASSWORD",
+    "Key Vault",
+    "--reset flag",
+    "/auth/token endpoint",
+    "rate limiting",
+    "public demo deployment"
+  ],
+  "cross_refs": [],
+  "locked": true,
+  "precedence": null,
+  "notes": ""
+}

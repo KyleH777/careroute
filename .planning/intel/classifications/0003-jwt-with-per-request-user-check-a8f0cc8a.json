@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/kyleharrington/Desktop/AI/Docker/CareRoute/docs/adr/0003-jwt-with-per-request-user-check.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "ADR-0003: JWT bearer auth with a per-request user re-check",
+  "summary": "Adopts short-lived HS256 JWTs via OAuth2 password flow with argon2id hashing, re-loading the user from the database on every request for immediate revocation.",
+  "scope": ["authentication", "JWT", "OAuth2 password flow", "argon2id password hashing", "role-based access (viewer, clinician, coordinator)", "/auth/token endpoint", "JWT_SECRET", "user is_active/role checks"],
+  "cross_refs": [],
+  "locked": true,
+  "precedence": null,
+  "notes": "Filename hash suffix is a placeholder (nohash00): no shell was available to compute the SHA-256 of the source path. Slug is unique, so no collision is expected."
+}

@@ -1,0 +1,22 @@
+{
+  "source_path": "/Users/kyleharrington/Desktop/AI/Docker/CareRoute/docs/adr/0001-one-shot-migration-before-api.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "ADR-0001: One-shot migration step gates API startup",
+  "summary": "Database migrations run in a dedicated one-shot process (Compose migrate service locally, careroute-migrate Container Apps Job on Azure) that must succeed before the API starts.",
+  "scope": [
+    "database migrations",
+    "Alembic",
+    "API startup",
+    "Docker Compose migrate service",
+    "Azure Container Apps Job careroute-migrate",
+    "deploy ordering",
+    "CI migration round-trip check",
+    "native enum DROP TYPE handling"
+  ],
+  "cross_refs": [],
+  "locked": true,
+  "precedence": null,
+  "notes": ""
+}

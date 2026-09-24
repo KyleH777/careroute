@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/kyleharrington/Desktop/AI/Docker/CareRoute/docs/adr/0005-docker-hardened-images.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "ADR-0005: Docker Hardened Images as the base image",
+  "summary": "Replaces python:3.12-slim with Docker Hardened Images (dhi.io python 3.12 debian13), shell-less, non-root uid 65532, multi-arch, gated by Trivy in CI.",
+  "scope": ["Dockerfile base image", "dhi.io/python:3.12-debian13", "dhi.io/python:3.12-debian13-dev", "multi-stage build virtualenv", "non-root uid 65532", "multi-arch amd64/arm64", "CI Trivy gate", "Docker Scout VEX", "DOCKERHUB secrets", "docker debug"],
+  "cross_refs": [],
+  "locked": true,
+  "precedence": null,
+  "notes": ""
+}

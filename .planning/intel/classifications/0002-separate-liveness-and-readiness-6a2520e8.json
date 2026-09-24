@@ -1,0 +1,23 @@
+{
+  "source_path": "/Users/kyleharrington/Desktop/AI/Docker/CareRoute/docs/adr/0002-separate-liveness-and-readiness.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "ADR-0002: Separate liveness and readiness probes",
+  "summary": "Split /health (liveness, no DB access, always 200) from /ready (readiness, SELECT 1, 503 on DB outage) so DB outages stop traffic without triggering restarts.",
+  "scope": [
+    "/health liveness endpoint",
+    "/ready readiness endpoint",
+    "database connectivity check",
+    "container HEALTHCHECK",
+    "Azure Container Apps liveness probe",
+    "Azure Container Apps readiness probe",
+    "ingress routing",
+    "pool_pre_ping",
+    "on-call runbook"
+  ],
+  "cross_refs": [],
+  "locked": true,
+  "precedence": null,
+  "notes": ""
+}
