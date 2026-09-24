@@ -12,6 +12,10 @@ on every push.
 
 [![CI](https://github.com/KyleH777/careroute/actions/workflows/ci.yml/badge.svg)](https://github.com/KyleH777/careroute/actions/workflows/ci.yml)
 
+**Live demo:** [https://careroute-api.yellowglacier-b6e91890.centralus.azurecontainerapps.io/docs](https://careroute-api.yellowglacier-b6e91890.centralus.azurecontainerapps.io/docs). Click **Authorize** and log in as
+`viewer@careroute.demo` / `careroute-demo` (read-only). The API scales to zero
+when idle, so the first request can take a few seconds.
+
 FastAPI + Postgres 16, with JWT authentication and role-based access control,
 Alembic migrations, a deterministic seed dataset, a tested backup/restore
 drill, and a CI pipeline that lints, tests, scans and publishes the image.
@@ -286,6 +290,9 @@ object storage, never in version control.
 - **[On-call runbook](docs/RUNBOOK.md)**: symptoms, diagnosis and fixes for
   database outages, failed starts, auth failures, rollbacks, restores and red
   CI. Every procedure was run against this stack.
+- **[Architecture decisions](docs/adr/README.md)**: why it's built this way,
+  one short record per decision (probes, auth, audit, image, state, network,
+  secrets, demo access).
 - **[Incident response](docs/INCIDENT-RESPONSE.md)**: severity levels, roles,
   communication, the security/PHI-exposure path, known gaps, and a
   post-incident review template.
