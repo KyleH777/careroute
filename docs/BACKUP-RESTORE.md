@@ -203,8 +203,12 @@ Be honest about the boundaries of this procedure:
 
 - **These are logical backups, not point-in-time recovery.** You can restore to
   the moment a dump was taken and no finer. In Azure, the platform's own
-  automated backups provide PITR — see [AZURE.md](AZURE.md). Treat these dumps
+  automated backups provide PITR — see
+  [AZURE.md → Backups and restore](AZURE.md#backups-and-restore). Treat these dumps
   as a portable, provider-independent second line of defence, not a replacement.
+- **These scripts target the local Compose stack.** They can't reach the Azure
+  database: it is private, and there's no in-VNet dump job yet (a known gap,
+  listed in AZURE.md).
 - **`backups/` is git-ignored and local.** For anything real, ship archives off
   the machine that produced them — Azure Blob Storage with immutability, or
   equivalent. A backup on the same disk as the database is not a backup.

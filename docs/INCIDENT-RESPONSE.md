@@ -66,11 +66,11 @@ Restore service first; root cause comes later. From the runbook:
 
 | Situation | Fastest mitigation |
 |---|---|
-| Bad deploy | Roll back to the previous `sha-` image (RUNBOOK → Bad deploy) |
-| Database down | Restart it; the api reconnects automatically (RUNBOOK → Database unreachable) |
+| Bad deploy | Roll back to the previous `sha-` image (RUNBOOK → Bad deploy). Azure: set `image` in `infra/variables.tf`, then `terraform apply` |
+| Database down | Restart it; the api reconnects automatically (RUNBOOK → Database unreachable). Azure: `az postgres flexible-server start` or `restart` |
 | Compromised account | Set `is_active = false`: effective on its **next request** (RUNBOOK → Lock out a user) |
-| Leaked `JWT_SECRET` | Rotate it: invalidates **all** tokens at once |
-| Bad data change | **Snapshot first**, then restore or point-in-time restore (RUNBOOK → Data loss) |
+| Leaked `JWT_SECRET` | Rotate it: invalidates **all** tokens at once (RUNBOOK → Invalidate everyone's tokens). Azure: `terraform apply -replace=random_password.jwt_secret`, then restart the revision |
+| Bad data change | **Snapshot first**, then restore or point-in-time restore (RUNBOOK → Data loss). Azure: note the UTC time, then PITR to a *new* server |
 
 ### 3. Preserve evidence
 
@@ -80,6 +80,17 @@ Before changing anything you can't undo:
 ./scripts/backup.sh incident-$(date -u +%Y%m%dT%H%M%SZ)     # database as it is now
 docker compose logs --timestamps > backups/incident-logs-$(date -u +%Y%m%dT%H%M%SZ).txt
 ```
+
+**Azure:** there is no `backup.sh`. Instead:
+
+- **Write down the UTC time.** Point-in-time restore to a new server can
+  recover the database as it was at any moment in the last 7 days, so the
+  timestamp *is* the snapshot. Don't restore yet unless you need to
+  ([AZURE.md → Backups and restore](AZURE.md#backups-and-restore)).
+- **Export the logs now.** Log Analytics keeps 30 days, and ingestion stops for
+  the day past the 0.5 GB cap. Query `ContainerAppConsoleLogs_CL` for the
+  incident window and save the results into `backups/`
+  ([AZURE.md → Logs](AZURE.md#logs)).
 
 Treat these as sensitive: they may contain PHI. Store them with restricted
 access, **never** in git, chat, or a ticket attachment. Both commands write
@@ -120,9 +131,24 @@ accessed, changed or leaked by someone unauthorized.
 ### Contain
 
 - **Specific accounts:** deactivate them (`is_active = false`).
-- **Token or signing key exposure:** rotate `JWT_SECRET`.
-- **Database credentials exposed:** rotate the Postgres password, update
-  `DATABASE_URL`, restart the api.
+- **Token or signing key exposure:** rotate `JWT_SECRET`. Azure:
+  `terraform apply -replace=random_password.jwt_secret`, which writes a new
+  version of Key Vault secret `jwt-secret`. Then
+  `az containerapp revision restart` on the active `careroute-api` revision so
+  it takes effect now rather than within 30 minutes. Expect every session to
+  get 401.
+- **Database credentials exposed:** Azure: `terraform apply -replace=random_password.postgres_admin`.
+  That single apply changes the server's admin password **and** the
+  `database-url` Key Vault secret. Nobody edits `DATABASE_URL` by hand. Then
+  restart the active `careroute-api` revision. Between the apply and the
+  restart, `/ready` returns 503. Jobs pick up the new value on their next run.
+  Compose (dev): change the password and `DATABASE_URL` together, then
+  `docker compose up -d api`.
+- **Terraform state or a `*.tfplan` file exposed:** both contain **every**
+  secret. Rotate all four `random_password` resources, and review who holds
+  Storage Blob Data Reader on the state account
+  ([ADR-0006](adr/0006-terraform-state-backend.md)). Steps for each:
+  [AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation).
 - **Leaked dump or backup file:** get it taken down; identify which backup it
   was (timestamp in the filename) to know what data it held.
 
@@ -232,4 +258,7 @@ An untested plan is a guess. Drills worth running, all safe on the dev stack:
 | Database outage | `docker compose stop db`, work the runbook, `docker compose start db` | `/ready` goes 503; api recovers on its own |
 | Restore | The full drill in BACKUP-RESTORE.md | Backups actually restore, verified by fingerprint |
 | Compromised account | Deactivate a demo user mid-session | Their existing token is rejected on the next request |
-| Secret rotation | `JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))") docker compose up -d api`, then `docker compose up -d api` to go back | Every old token fails; new logins work |
+| Secret rotation (dev stack) | `JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))") docker compose up -d api`, then `docker compose up -d api` to go back | Every old token fails; new logins work |
+
+An Azure rotation drill (RUNBOOK → Invalidate everyone's tokens) logs out
+the live demo and restarts the API. Run it only with the owner's go-ahead.
