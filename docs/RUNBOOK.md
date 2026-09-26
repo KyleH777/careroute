@@ -34,7 +34,7 @@ docker compose ps                                   # 1. what's running, what's 
 curl -s -w ' [%{http_code}]\n' localhost:8000/health  # 2. is the process alive?
 curl -s -w ' [%{http_code}]\n' localhost:8000/ready   # 3. can it reach the database?
 docker compose logs api --since 15m | tail -50      # 4. what is it saying?
-docker compose logs migrate                         # 5. did the last migration succeed?
+docker compose logs db-roles migrate                # 5. did roles + the last migration succeed?
 ```
 
 **Azure:**
@@ -110,13 +110,17 @@ curl -s -w ' [%{http_code}]\n' localhost:8000/ready     # expect 200, "reachable
 
 ## API won't start
 
-The api only starts after `migrate` **exits 0**, so check migrate first.
+The api only starts after `db-roles` and then `migrate` **exit 0**, so check
+those first.
 
 ```bash
-docker compose ps -a                 # look at migrate's exit code
-docker compose logs migrate
+docker compose ps -a                 # look at db-roles' and migrate's exit codes
+docker compose logs db-roles migrate
 docker compose logs api | tail -40
 ```
+
+If `db-roles` failed, its log says which step. It runs as the Compose superuser
+(`careroute`); see [Database roles](#database-roles).
 
 ### `migrate` exited non-zero → api never started
 
@@ -181,10 +185,11 @@ docker compose exec db psql -U careroute -d careroute \
 
 Re-enable with `is_active = true`.
 
-**Azure:** the same `UPDATE`, run as an in-VNet one-off job
-([AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)),
-with `.commit()` after `execute`. This **writes to live data** as the server
-admin. Double-check the email before you run it.
+**Azure:** the same `UPDATE`, run as an in-VNet one-off job through the seed
+job (`careroute_app`;
+[AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)),
+with `.commit()` after `execute`. This **writes to live data**. Double-check the
+email before you run it.
 
 ### Invalidate everyone's tokens (suspected `JWT_SECRET` leak)
 
@@ -239,6 +244,26 @@ Known limitations.
 
 ---
 
+## Database roles
+
+Nothing that runs day to day uses the database superuser/admin
+([ADR-0010](adr/0010-per-workload-identities-and-db-roles.md)):
+
+| Role | Can | Used by (Compose) | Used by (Azure) |
+|---|---|---|---|
+| `careroute_app` | Read/write rows. No DDL, no TRUNCATE | `api`, tests | API, seed job |
+| `careroute_migrate` | Owns the schema | `migrate`, test cleanup, `seed --reset` | migrate job |
+| superuser / server admin | Everything | `db-roles` only | `careroute-db-bootstrap` only |
+
+| Symptom | Meaning | Fix |
+|---|---|---|
+| api logs `permission denied for table <x>` | A table isn't granted to the app role (created outside a migration, or restored by a superuser) | Re-run the role bootstrap: `docker compose run --rm db-roles` / `az containerapp job start -g careroute-rg -n careroute-db-bootstrap`. It re-applies ownership and grants |
+| `password authentication failed for user "careroute_app"` in Azure | Role password rotated in Key Vault but not yet in Postgres | Run `careroute-db-bootstrap`, then restart the API ([AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation)) |
+| `must be owner of sequence` / `permission denied` on TRUNCATE | Something tried to truncate as the app role | Run it as the migrate role, e.g. `docker compose run --rm migrate python scripts/seed.py --reset` |
+| A new migration's table is unreadable by the app | Shouldn't happen: default privileges cover tables the migrate role creates, and `tests/test_db_roles.py` fails CI if not | Check the migration ran as `careroute_migrate`, then re-run db-roles |
+
+---
+
 ## Bad deploy / rollback
 
 CI publishes every `main` commit as `ghcr.io/kyleh777/careroute:sha-<commit>`
@@ -272,14 +297,14 @@ docker compose run --rm migrate alembic current                   # where are we
 docker compose run --rm migrate alembic downgrade <good-revision>  # e.g. 0f4937d2a980
 ```
 
-Azure (`JOB_ENV` is defined in [AZURE.md → Deploying a new image](AZURE.md#deploying-a-new-image);
+Azure (`MIGRATE_ENV` is defined in [AZURE.md → Deploying a new image](AZURE.md#deploying-a-new-image);
 an override without it runs with no database URL): there is no `backup.sh`. Instead, **write down the current UTC time**
 as your point-in-time-restore target. Then run the downgrade with the **bad**
 (newer) image through the migrate job, and only after it succeeds roll the image
 back as in 2a:
 
 ```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<bad-sha> --env-vars "${JOB_ENV[@]}" --command alembic --args downgrade <good-revision>
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<bad-sha> --env-vars "${MIGRATE_ENV[@]}" --command alembic --args downgrade <good-revision>
 ```
 
 ```bash

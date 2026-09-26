@@ -137,15 +137,20 @@ accessed, changed or leaked by someone unauthorized.
   `az containerapp revision restart` on the active `careroute-api` revision so
   it takes effect now rather than within 30 minutes. Expect every session to
   get 401.
-- **Database credentials exposed:** Azure: `terraform apply -replace=random_password.postgres_admin`.
-  That single apply changes the server's admin password **and** the
-  `database-url` Key Vault secret. Nobody edits `DATABASE_URL` by hand. Then
-  restart the active `careroute-api` revision. Between the apply and the
-  restart, `/ready` returns 503. Jobs pick up the new value on their next run.
-  Compose (dev): change the password and `DATABASE_URL` together, then
-  `docker compose up -d api`.
+- **Database credentials exposed:** find out which role's. Azure: rotate with
+  `terraform apply -replace=random_password.<pg_app | pg_migrate | postgres_admin>`,
+  then **immediately** run `careroute-db-bootstrap`, which sets the new password
+  in Postgres. For the app role, also restart the active `careroute-api`
+  revision. Until bootstrap runs, Key Vault and the database disagree and the
+  affected workload can't connect. The admin password is used only by
+  db-bootstrap, so rotating it doesn't touch the API
+  ([AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation)). Nobody
+  edits a connection string by hand. Compose (dev): the passwords are dev-only
+  literals in `docker-compose.yml`; change them there and
+  `docker compose up -d`.
 - **Terraform state or a `*.tfplan` file exposed:** both contain **every**
-  secret. Rotate all four `random_password` resources, and review who holds
+  secret. Rotate every `random_password` resource (the three database roles,
+  the JWT key and both demo passwords), run db-bootstrap, restart the API, and review who holds
   Storage Blob Data Reader on the state account
   ([ADR-0006](adr/0006-terraform-state-backend.md)). Steps for each:
   [AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation).

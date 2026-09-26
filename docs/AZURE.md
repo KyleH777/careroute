@@ -41,13 +41,14 @@ reviewed, not rehearsed.
 | Postgres Flexible Server | `careroute-pg-<suffix>` | Postgres 16, B1ms, 32 GiB, 7-day backups, admin login `careroute_admin` |
 | Database | `careroute` | The application database |
 | Key Vault | `kv-careroute-<suffix>` | Every secret, RBAC mode, 7-day soft delete |
-| Managed identity | `careroute-app-id` | The only identity the app and jobs use to read secrets |
-| Role assignments | Key Vault Secrets Officer (whoever runs Terraform), Key Vault Secrets User (`careroute-app-id`) | Write vs. read access to secrets |
+| Managed identities | `careroute-app-id` (API), `careroute-migrate-id`, `careroute-seed-id`, `careroute-dbbootstrap-id` | One per workload ([ADR-0010](adr/0010-per-workload-identities-and-db-roles.md)) |
+| Role assignments | Key Vault Secrets Officer (whoever runs Terraform, vault-wide); Key Vault Secrets User **per secret** for each workload identity | Write vs. read access. Each workload reads only its own secrets (see [Secrets and rotation](#secrets-and-rotation)) |
 | Log Analytics workspace | `careroute-logs` | Container logs, 30-day retention, 0.5 GB/day ingestion cap |
 | Container Apps environment | `careroute-env` | Consumption workload profile, VNet-integrated |
 | Container App | `careroute-api` | The API. External ingress on port 8000, 0-2 replicas, liveness `/health`, readiness `/ready` |
 | Container Apps Job | `careroute-migrate` | `alembic upgrade head`, manual trigger |
 | Container Apps Job | `careroute-seed` | `python scripts/seed.py --demo-deployment`, manual trigger |
+| Container Apps Job | `careroute-db-bootstrap` | `python scripts/db_roles.py` as the server admin: creates and maintains the database roles, manual trigger |
 
 **Network.** Postgres is VNet-injected into `snet-postgres` with
 `public_network_access_enabled = false`. It has no public endpoint, so there
@@ -63,12 +64,22 @@ account predates that finding and stays in eastus. It holds only the state
 file, so the cross-region hop doesn't matter.
 
 **Secrets.** Terraform's `random_password` generates every secret and writes it
-to Key Vault. The Container App and both jobs read secrets through
-`careroute-app-id`, using versionless Key Vault references. No human types,
-sees or pastes a production secret. Why:
-[ADR-0008](adr/0008-secrets-generated-into-key-vault.md). The same values are
+to Key Vault. Each workload reads only its own secrets, through its own
+identity, using versionless Key Vault references. No human types, sees or
+pastes a production secret. Why:
+[ADR-0008](adr/0008-secrets-generated-into-key-vault.md) and
+[ADR-0010](adr/0010-per-workload-identities-and-db-roles.md). The same values are
 also in Terraform state, which is why the state backend is locked down
 ([ADR-0006](adr/0006-terraform-state-backend.md)).
+
+**Database roles.** Nothing that runs day to day connects as the server admin
+([ADR-0010](adr/0010-per-workload-identities-and-db-roles.md)):
+
+| Postgres role | Can | Used by | Key Vault secret | Identity |
+|---|---|---|---|---|
+| `careroute_app` | SELECT/INSERT/UPDATE/DELETE on app tables. No DDL, no TRUNCATE | API, seed job | `database-url` | `careroute-app-id` (API), `careroute-seed-id` (seed) |
+| `careroute_migrate` | Owns the schema: all DDL | migrate job | `database-url-migrate` | `careroute-migrate-id` |
+| `careroute_admin` (server admin) | Everything | **only** the db-bootstrap job | `database-url-admin` | `careroute-dbbootstrap-id` |
 
 ---
 
@@ -119,8 +130,14 @@ git-ignored, but that only keeps it out of git, not off your disk.
 rm careroute.tfplan
 ```
 
-**5. Migrate, then seed.** Terraform never runs the jobs itself. On a fresh
-database the API is up before any tables exist. `/ready` still returns 200
+**5. Create the database roles, then migrate, then seed.** Terraform never runs
+the jobs itself. First the roles:
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-db-bootstrap
+```
+
+On a fresh database the API is up before any tables exist. `/ready` still returns 200
 (it only checks that the database is reachable), but every data request fails
 until the migration runs ([ADR-0001](adr/0001-one-shot-migration-before-api.md)).
 
@@ -151,14 +168,22 @@ matters**: migrate with the new image first, then roll the app
 execution. An override **replaces the job's whole container definition**, so
 the command and environment must be passed again. Without them the job starts
 the image's default command, which is the API server, with no database URL.
-Set the environment once per shell:
+An override can only reference secrets that are defined on that job. Set the
+environments once per shell:
 
 ```bash
-JOB_ENV=(APP_ENV=production PYTHONUNBUFFERED=1 DATABASE_URL=secretref:database-url JWT_SECRET=secretref:jwt-secret)
+MIGRATE_ENV=(APP_ENV=production PYTHONUNBUFFERED=1 DATABASE_URL=secretref:database-url-migrate JWT_SECRET=secretref:jwt-secret)
 ```
 
 ```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<new> --env-vars "${JOB_ENV[@]}" --command alembic --args upgrade head
+READ_ENV=(APP_ENV=production PYTHONUNBUFFERED=1 DATABASE_URL=secretref:database-url)
+```
+
+`MIGRATE_ENV` is for the migrate job (schema owner). `READ_ENV` is for the
+seed job (DML-only app role), which is the one to use for queries.
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<new> --env-vars "${MIGRATE_ENV[@]}" --command alembic --args upgrade head
 ```
 
 ```bash
@@ -191,16 +216,21 @@ rollback is the same edit-and-apply with the previous tag (RUNBOOK → Bad deplo
 
 ## Migrations and seeding
 
-Both jobs run the deployed image with the same environment and secrets as the
-API.
+All jobs run the deployed image, each with its own identity and database role.
 
-| | `careroute-migrate` | `careroute-seed` |
-|---|---|---|
-| Command | `alembic upgrade head` | `python scripts/seed.py --demo-deployment` |
-| Trigger | Manual | Manual |
-| Timeout | 600 s | 600 s |
-| Retries | **0**: a failed migration needs a human, not a retry | 0 |
-| Secrets | `database-url`, `jwt-secret` | Those plus both private demo passwords |
+| | `careroute-db-bootstrap` | `careroute-migrate` | `careroute-seed` |
+|---|---|---|---|
+| Command | `python scripts/db_roles.py` | `alembic upgrade head` | `python scripts/seed.py --demo-deployment` |
+| Connects as | server admin | `careroute_migrate` | `careroute_app` |
+| Trigger | Manual | Manual | Manual |
+| Timeout | 300 s | 600 s | 600 s |
+| Retries | 0 | **0**: a failed migration needs a human, not a retry | 0 |
+| Secrets | `database-url-admin`, `db-migrate-password`, `db-app-password` | `database-url-migrate`, `jwt-secret` | `database-url`, `jwt-secret`, both private demo passwords |
+
+`db-bootstrap` is safe to re-run at any time. It creates missing roles,
+re-syncs their passwords, hands any stray objects to `careroute_migrate` and
+re-applies grants. Run it after a password rotation, and whenever the API logs
+`permission denied for table ...`.
 
 To review a migration's SQL before it runs in production, render it against
 the **local** stack. The SQL is the same, and no production credentials are
@@ -257,68 +287,87 @@ Two limits to know during an incident:
 ## Querying the database from inside the VNet
 
 A laptop can't reach the database: it has no public endpoint, by design. To
-run a one-off query, start the migrate job with a **command override**. It
-runs inside the VNet. The image has Python, SQLAlchemy and psycopg, but no
-shell and no `psql`.
+run a one-off query, start a job with a **command override**. It runs inside
+the VNet. The image has Python, SQLAlchemy and psycopg, but no shell and no
+`psql`.
+
+Which job decides which role you connect as:
+
+| For | Job | Env | Role |
+|---|---|---|---|
+| Reads and data fixes (account lookup, lockout, audit queries) | `careroute-seed`, container `seed` | `READ_ENV` | `careroute_app` |
+| Alembic (`current`, `downgrade`) | `careroute-migrate`, container `migrate` | `MIGRATE_ENV` | `careroute_migrate` |
+| Break-glass admin checks (e.g. who is connected) | `careroute-db-bootstrap`, container `db-bootstrap` | `PYTHONUNBUFFERED=1 ADMIN_DATABASE_URL=secretref:database-url-admin` (read `ADMIN_DATABASE_URL` in the code) | server admin |
+
+Use the least-privileged row that works.
 
 Three rules, all learned by running it:
 - An override replaces the whole container, so pass `--image` and the
-  environment (`JOB_ENV`, from [Deploying a new image](#deploying-a-new-image))
-  every time. Without them it fails with `Image property` or
-  `KeyError: 'DATABASE_URL'`.
+  environment (`READ_ENV`/`MIGRATE_ENV`, from
+  [Deploying a new image](#deploying-a-new-image)) every time. Without them it
+  fails with `Image property` or `KeyError: 'DATABASE_URL'`.
 - Attach Python's `-c` to the code, as in `"-cimport ..."`. A bare `-c` is
-  parsed by `az` as its own flag and rejected.
+  parsed by `az` as its own flag and rejected. Keep the code on **one line**:
+  a `\n` inside the quotes reaches Python literally and fails with a
+  `SyntaxError`.
 - Take the image from the job, so the query runs the deployed code:
 
 ```bash
-IMG=$(az containerapp job show -g careroute-rg -n careroute-migrate --query "properties.template.containers[0].image" -o tsv)
+IMG=$(az containerapp job show -g careroute-rg -n careroute-seed --query "properties.template.containers[0].image" -o tsv)
 ```
 
 Example: look up one account (read-only):
 
 ```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image "$IMG" --env-vars "${JOB_ENV[@]}" --command python --args "-cimport os, sqlalchemy as sa; e = sa.create_engine(os.environ['DATABASE_URL']); print(e.connect().execute(sa.text(\"select email, role, is_active from users where email = 'someone@example.com'\")).all())" --query name -o tsv
+az containerapp job start -g careroute-rg -n careroute-seed --container-name seed --image "$IMG" --env-vars "${READ_ENV[@]}" --command python --args "-cimport os, sqlalchemy as sa; e = sa.create_engine(os.environ['DATABASE_URL']); print(e.connect().execute(sa.text(\"select email, role, is_active from users where email = 'someone@example.com'\")).all())" --query name -o tsv
 ```
 
 That prints the execution name. When
-`az containerapp job execution show -g careroute-rg -n careroute-migrate --job-execution-name <name> --query properties.status -o tsv`
+`az containerapp job execution show -g careroute-rg -n careroute-seed --job-execution-name <name> --query properties.status -o tsv`
 says `Succeeded` (a few seconds of run time, plus a minute or two of
 scheduling), read the output:
 
 ```bash
-az containerapp job logs show -g careroute-rg -n careroute-migrate --container migrate --execution <name> --format text
+az containerapp job logs show -g careroute-rg -n careroute-seed --container seed --execution <name> --format text
 ```
 
-The current schema revision, the same way:
+The current schema revision, through the migrate job:
 
 ```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image "$IMG" --env-vars "${JOB_ENV[@]}" --command alembic --args current --query name -o tsv
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image "$IMG" --env-vars "${MIGRATE_ENV[@]}" --command alembic --args current --query name -o tsv
 ```
 
-Status: **rehearsed on 2026-09-25**. The account lookup returned the demo
-viewer row, and `alembic current` returned `a6ca29d19c0c (head)`.
+Status: **rehearsed** on 2026-09-25 (as admin, before the role split) and
+2026-09-26 (as `careroute_app` through the seed job, reads succeeded and
+`CREATE TABLE` was denied).
 
 Know what you're doing when you use this:
-- It connects as the **server admin** (the app has no least-privilege role
-  yet; roadmap Phase 2). A typo in a write statement hits live data. Take a
-  timestamp for point-in-time restore first.
+- Through the seed job you are `careroute_app`: you can't damage the schema,
+  but a typo in an `UPDATE`/`DELETE` still hits live data. Take a timestamp for
+  point-in-time restore first.
 - The command text is kept in the job's execution history and printed to the
   logs. **Never put a secret in it.** Never print `DATABASE_URL`.
 - Anyone who can start a job can override its command and read the job's
-  secrets. Treat "can start `careroute-migrate`" as "can read the database
-  password".
+  secrets. Treat "can start `careroute-db-bootstrap`" as admin on the database,
+  and "can start `careroute-migrate`" as schema owner.
 - Each execution bills a few seconds of consumption compute.
 
 ---
 
 ## Secrets and rotation
 
-| Key Vault secret | Env var | Read by | Generated by |
+| Key Vault secret | Env var | Read by (identity) | Generated by |
 |---|---|---|---|
-| `database-url` | `DATABASE_URL` | API, migrate, seed | `random_password.postgres_admin` + server FQDN |
+| `database-url` | `DATABASE_URL` | API (`careroute-app-id`), seed (`careroute-seed-id`) | `random_password.pg_app`: role `careroute_app` |
+| `database-url-migrate` | `DATABASE_URL` | migrate (`careroute-migrate-id`) | `random_password.pg_migrate`: role `careroute_migrate` |
+| `database-url-admin` | `ADMIN_DATABASE_URL` | db-bootstrap (`careroute-dbbootstrap-id`) | `random_password.postgres_admin` |
+| `db-app-password` / `db-migrate-password` | `APP_DB_PASSWORD` / `MIGRATE_DB_PASSWORD` | db-bootstrap | `random_password.pg_app` / `pg_migrate` |
 | `jwt-secret` | `JWT_SECRET` | API, migrate, seed | `random_password.jwt_secret` |
 | `demo-clinician-password` | `DEMO_CLINICIAN_PASSWORD` | seed | `random_password.demo_clinician` |
 | `demo-coordinator-password` | `DEMO_COORDINATOR_PASSWORD` | seed | `random_password.demo_coordinator` |
+
+Key Vault access is granted per secret, exactly as in this table, so the API's
+identity can't read the migrate or admin credentials.
 
 With `APP_ENV=production`, the API refuses to start if `JWT_SECRET` is still
 the built-in development default. That makes a missing Key Vault reference
@@ -351,11 +400,15 @@ What each rotation does:
 | Rotate | Resource | Effect |
 |---|---|---|
 | JWT signing key | `random_password.jwt_secret` | Every issued token fails at once. Everyone logs in again. This is the "log everyone out" lever |
-| Database password | `random_password.postgres_admin` | One apply changes the server's admin password **and** the `database-url` secret. Until the API restarts, it holds the old password: `/ready` returns 503 and requests fail. Restart straight away, off-hours if you can |
+| App role password | `random_password.pg_app` | The apply writes the new password to Key Vault, but the database still has the old one. **Immediately** run `careroute-db-bootstrap` (it sets the new password in Postgres), then restart the API. Between the apply and the bootstrap, any API restart, including Container Apps' own refresh within 30 minutes, picks up a password the database doesn't accept yet |
+| Migrate role password | `random_password.pg_migrate` | Same: apply, then run `careroute-db-bootstrap`. Only the migrate job uses it, so there's no API impact |
+| Server admin password | `random_password.postgres_admin` | One apply changes the admin password and `database-url-admin`. Only db-bootstrap uses it: no API impact |
 | Demo passwords | `random_password.demo_clinician` / `demo_coordinator` | New values in Key Vault. Run `careroute-seed` again to apply them to the accounts |
 
-If Terraform **state**, or a `*.tfplan` file, may have leaked, treat all four
-secrets as exposed and rotate them all. Both contain every value.
+If Terraform **state**, or a `*.tfplan` file, may have leaked, treat every
+secret as exposed and rotate them all: `postgres_admin`, `pg_migrate`,
+`pg_app`, `jwt_secret` and both demo passwords. Both contain every value. One
+apply with a `-replace` for each, then db-bootstrap, then restart the API.
 
 Break-glass read of a secret (needs Key Vault Secrets Officer; prints the
 value to your terminal, so be deliberate):

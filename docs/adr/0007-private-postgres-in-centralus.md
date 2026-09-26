@@ -15,4 +15,4 @@ Postgres 16 Flexible Server (B1ms) is VNet-injected into a delegated subnet with
 
 - There is no public database endpoint and no firewall rule to get wrong.
 - You can't `psql` from a laptop directly; use a job/container inside the VNet or add a jump host.
-- The app currently connects as the server admin; a dedicated least-privilege role is open work.
+- The app connects as a DML-only role; only the db-bootstrap job uses the server admin ([ADR-0010](0010-per-workload-identities-and-db-roles.md)).

@@ -60,8 +60,13 @@ docker compose up --build
 ```
 
 Startup is ordered on purpose: Postgres must report healthy, then a one-shot
-`migrate` service runs `alembic upgrade head` and exits 0, and only then does
-the api start. The api never serves traffic against an un-migrated schema.
+`db-roles` service creates the least-privilege database roles, then `migrate`
+runs `alembic upgrade head` as the schema owner (`careroute_migrate`) and exits
+0, and only then does the api start, as the DML-only `careroute_app`. The api
+never serves traffic against an un-migrated schema, and can't change the schema
+itself ([ADR-0010](docs/adr/0010-per-workload-identities-and-db-roles.md)). The
+same split runs in the test stack and CI, where `tests/test_db_roles.py` fails
+the build if a migration leaves the app without a grant.
 
 Load the test dataset:
 
@@ -253,10 +258,10 @@ docker compose exec api python scripts/seed.py
 
 Idempotent — re-running is a no-op (apart from adding any missing demo
 users). Refuses to run unless `APP_ENV` is `local`, `dev` or `test`. To wipe and
-reload:
+reload (runs as the schema owner, because only it may truncate; ADR-0010):
 
 ```bash
-docker compose exec api python scripts/seed.py --reset
+docker compose run --rm migrate python scripts/seed.py --reset
 ```
 
 ---
@@ -290,7 +295,7 @@ object storage, never in version control.
 - **[On-call runbook](docs/RUNBOOK.md)**: symptoms, diagnosis and fixes for
   database outages, failed starts, auth failures, rollbacks, restores and red
   CI. The Compose procedures were run against this stack; of the Azure ones, the
-  log read and in-VNet database query were rehearsed live, and the rest are syntax-checked.
+  log read, in-VNet database queries and role rollout were run live, and the rest are syntax-checked.
 - **[Architecture decisions](docs/adr/README.md)**: why it's built this way,
   one short record per decision (probes, auth, audit, image, state, network,
   secrets, demo access).

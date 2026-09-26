@@ -206,6 +206,16 @@ Be honest about the boundaries of this procedure:
   automated backups provide PITR — see
   [AZURE.md → Backups and restore](AZURE.md#backups-and-restore). Treat these dumps
   as a portable, provider-independent second line of defence, not a replacement.
+- **Restores take ownership away from the schema owner.** `pg_restore --no-owner`
+  leaves every restored object owned by the user who ran it (the Compose
+  superuser), and the DML-only app role loses access. Re-apply the role model
+  afterwards. Verified 2026-09-25: one run restored ownership and grants, and
+  all rows were intact.
+
+  ```bash
+  docker compose run --rm db-roles
+  ```
+
 - **These scripts target the local Compose stack.** They can't reach the Azure
   database: it is private, and there's no in-VNet dump job yet (a known gap,
   listed in AZURE.md).
