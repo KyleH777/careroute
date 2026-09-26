@@ -289,7 +289,8 @@ object storage, never in version control.
 
 - **[On-call runbook](docs/RUNBOOK.md)**: symptoms, diagnosis and fixes for
   database outages, failed starts, auth failures, rollbacks, restores and red
-  CI. Every procedure was run against this stack.
+  CI. The Compose procedures were run against this stack; the Azure ones are
+  syntax-checked, not yet rehearsed.
 - **[Architecture decisions](docs/adr/README.md)**: why it's built this way,
   one short record per decision (probes, auth, audit, image, state, network,
   secrets, demo access).
@@ -313,22 +314,31 @@ cd infra && terraform init -backend-config=backend.hcl
 
 The state storage account uses Entra ID auth only (storage keys disabled),
 HTTPS/TLS 1.2, no public access, blob versioning with 30-day soft delete, and a
-delete lock. `infra/main.tf` configures the backend only; no infrastructure is
-declared yet.
+delete lock.
+
+`infra/` declares the whole Azure deployment, all in centralus: the API on
+Container Apps, plus migrate and seed jobs; Postgres 16 on a private VNet with no
+public endpoint; Key Vault holding Terraform-generated secrets, read through a
+managed identity; and Log Analytics. Details in
+**[docs/AZURE.md](docs/AZURE.md)**. Rationale in ADRs
+[0006](docs/adr/0006-terraform-state-backend.md),
+[0007](docs/adr/0007-private-postgres-in-centralus.md) and
+[0008](docs/adr/0008-secrets-generated-into-key-vault.md).
 
 ---
 
 ## Deploying to Azure
 
-Setup for Azure Database for PostgreSQL Flexible Server, including free-tier
-eligibility rules, TLS, migrations, and point-in-time restore:
-**[docs/AZURE.md](docs/AZURE.md)**
-
-Nothing there has been provisioned — those commands create billable resources
-under your subscription.
+The [live demo](#careroute--containerized) runs on Azure and is deployed and
+changed only through Terraform. **[docs/AZURE.md](docs/AZURE.md)** covers the
+architecture, deploying a new image (migrate first, then roll the app), logs,
+secret rotation, point-in-time restore, cost and teardown. Applying the
+Terraform in your own subscription creates billable resources (see AZURE.md →
+Cost).
 
 The same image runs in both environments. `app/config.py` reads `DATABASE_URL`
-from the environment, so dev and prod differ only by that variable.
+from the environment, so dev and prod differ only by that variable. In Azure the
+value comes from Key Vault, not from a committed file or a hand-set app setting.
 
 ---
 
