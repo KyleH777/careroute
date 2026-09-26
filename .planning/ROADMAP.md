@@ -53,7 +53,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The new role passwords are Terraform `random_password` values in Key Vault, read by the Container App and jobs via the managed identity (ADR-0008). No human typed or saw them, and role creation runs from inside the VNet (no laptop DB access).
   4. The local Compose stack and CI tests use the same app/migrate role split, so a migration that forgets a grant fails CI before it reaches Azure.
   5. RUNBOOK/AZURE docs describe the roles, which workload uses which, and how to rotate each password.
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 02-01-PLAN.md — Idempotent `scripts/db_roles.py` + Compose/test/CI role split + privilege contract tests; rehearse the upgrade on admin-owned data (wave 1, local only)
+- [ ] 02-02-PLAN.md — Azure rollout in stages A/B/C: bootstrap job, per-workload identities, per-secret Key Vault RBAC; live evidence for criteria 1-3 (wave 2, checkpoints before push/apply/job runs)
+- [ ] 02-03-PLAN.md — ADR-0010 + AZURE/RUNBOOK/INCIDENT-RESPONSE/BACKUP-RESTORE/README for roles and rotation (wave 3)
 
 ### Phase 3: Automated Ordered Deploys
 **Goal**: Merging to `main` puts that commit's image live on Azure with no human steps. The migration always completes before any app revision serves the new code, and CI's Azure access is narrow and credential-free.
@@ -118,7 +121,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Ops Docs Match Deployment | 2/2 | Complete | 2026-09-25 |
-| 2. Least-Privilege Database Roles | 0/TBD | Not started | - |
+| 2. Least-Privilege Database Roles | 0/3 | Planned | - |
 | 3. Automated Ordered Deploys | 0/TBD | Not started | - |
 | 4. Observability & Central Log Retention | 0/TBD | Not started | - |
 | 5. Login Hardening | 0/TBD | Not started | - |

@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-09-24)
 
 **Core value:** On every push to `main`, CI deploys the live demo automatically, in ADR-0001 order. When an incident happens, it can be detected, scoped and contained using docs that match the deployed system, all under ~$20/month.
-**Current focus:** Phase 1 - Ops Docs Match Deployment
+**Current focus:** Phase 2 - Least-Privilege Database Roles
 
 ## Current Position
 
-Phase: 1 of 7 (Ops Docs Match Deployment)
-Plan: 2 of 2 in current phase
-Status: Phase 1 complete; ready to plan Phase 2
-Last activity: 2026-09-25 - Phase 1 executed: AZURE.md rewritten, README/RUNBOOK/INCIDENT-RESPONSE/BACKUP-RESTORE corrected
+Phase: 2 of 7 (Least-Privilege Database Roles)
+Plan: 0 of 3 in current phase
+Status: Ready to execute
+Last activity: 2026-09-25 - Phase 2 planned (3 plans, 3 waves); PG16 role model proven in local spike
 
 Progress: [█░░░░░░░░░] 14%
 
@@ -45,6 +45,8 @@ Recent decisions affecting current work:
 - [Roadmap]: R8 docs first, so later phases amend accurate runbooks
 - [Roadmap]: R6 DB roles before R2 CI deploy, so the pipeline automates the final credential/Terraform shape
 - [Phase 1]: Azure restore = PITR to new server; cutover and in-VNet logical dumps are documented gaps
+- [Phase 2]: Split identities per workload + per-secret Key Vault RBAC (user choice); ADR-0010 amends ADR-0008
+- [Phase 2]: PG16 bootstrap order: GRANT migrate TO admin WITH SET TRUE → schema CREATE → ALTER OWNER → SET ROLE migrate for grants/default privileges
 - [Phase 1]: Container Apps job overrides replace the whole container: always pass --image, --env-vars (secretref) and --command. Phase 3 CI must do the same
 - [Phase 1]: Deploy/rollback edits `image` in variables.tf (not `-var`) so later applies can't silently roll back
 - [Roadmap]: R3 observability/retention before R4/R5, so login and read-access events have a central home
@@ -73,5 +75,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 1 complete (rehearsal passed after doc fixes). Next: `/gsd:plan-phase 2`
+Stopped at: Phase 2 planned. Next: `/gsd:execute-phase 2` (02-02 has blocking checkpoints before push, each apply and job runs)
 Resume file: None
