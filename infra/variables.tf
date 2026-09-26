@@ -44,7 +44,7 @@ variable "api_max_replicas" {
 variable "db_roles_enabled" {
   description = "Switch workloads to the least-privilege Postgres roles and per-workload identities (stage B). Run careroute-db-bootstrap first."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "legacy_vault_wide_app_access" {
