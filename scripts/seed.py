@@ -3,7 +3,10 @@
 Run inside the stack:
 
     docker compose exec api python scripts/seed.py
-    docker compose exec api python scripts/seed.py --reset   # wipe first
+    docker compose run --rm migrate python scripts/seed.py --reset   # wipe first
+
+--reset truncates, which only the schema owner (careroute_migrate) may do, so
+it runs through the migrate service rather than the DML-only api (ADR-0010).
 
 Deterministic by design: the RNG is seeded, so every run produces byte-identical
 data. That is what makes the backup/restore drill verifiable — you can compare

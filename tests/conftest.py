@@ -3,7 +3,10 @@
 Runs against the ephemeral Postgres started by docker-compose.test.yml.
 `clean_tables` is autouse so every test starts with empty tables — no test
 depends on another test's data, and none of this touches the dev stack's
-seeded database (a separate container entirely).
+seeded database (a separate container entirely). It truncates through the
+schema owner's connection (OWNER_DATABASE_URL), because the app role the tests
+otherwise run as has no TRUNCATE, and RESTART IDENTITY needs sequence
+ownership (ADR-0010).
 
 `client` is authenticated as a coordinator (the role allowed to do
 everything), so endpoint tests exercise business rules without repeating
@@ -11,11 +14,12 @@ auth setup. Auth itself — 401s, 403s, the role matrix — is covered in
 test_auth.py via `anon_client` and `client_as`.
 """
 
+import os
 from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 
 from app.auth import create_access_token, hash_password
 from app.db import SessionLocal, engine
@@ -35,9 +39,17 @@ TEST_PASSWORD = "correct-horse-battery-staple"
 COORDINATOR_EMAIL = "coordinator@test.careroute"
 
 
+# Falls back to the app engine when unset (e.g. an older stack without roles).
+owner_engine = (
+    create_engine(os.environ["OWNER_DATABASE_URL"])
+    if os.environ.get("OWNER_DATABASE_URL")
+    else engine
+)
+
+
 @pytest.fixture(autouse=True)
 def clean_tables():
-    with engine.begin() as conn:
+    with owner_engine.begin() as conn:
         conn.execute(
             text(
                 "TRUNCATE TABLE referral_events, referrals, patients, "

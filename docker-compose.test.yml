@@ -31,16 +31,30 @@ services:
     # No published port, no named volume: reached only over this stack's
     # internal network, and data must not survive between runs.
 
-  migrate:
+  # Same role split as the dev stack and Azure (ADR-0010), so a migration
+  # that leaves the app without a grant fails here, not in production.
+  db-roles:
     build:
       context: .
       target: runtime
     image: careroute:local
     environment:
-      DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      ADMIN_DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      MIGRATE_DB_PASSWORD: careroute-migrate-test
+      APP_DB_PASSWORD: careroute-app-test
     depends_on:
       db:
         condition: service_healthy
+    command: ["python", "scripts/db_roles.py"]
+    restart: "no"
+
+  migrate:
+    image: careroute:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://careroute_migrate:careroute-migrate-test@db:5432/careroute
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
     command: ["alembic", "upgrade", "head"]
     restart: "no"
 
@@ -53,5 +67,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      # The app's own role, exactly as the API connects.
+      DATABASE_URL: postgresql+psycopg://careroute_app:careroute-app-test@db:5432/careroute
+      # Fixture cleanup only: TRUNCATE ... RESTART IDENTITY needs the owner.
+      OWNER_DATABASE_URL: postgresql+psycopg://careroute_migrate:careroute-migrate-test@db:5432/careroute
     command: ["pytest", "-v", "-p", "no:cacheprovider", "--cov=app", "--cov-report=term-missing"]

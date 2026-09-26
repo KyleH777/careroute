@@ -1,12 +1,17 @@
-# CareRoute dev stack: Postgres + migrations + api.
+# CareRoute dev stack: Postgres + roles + migrations + api.
 #
 #   docker compose up --build     start everything
 #   docker compose down           stop (data survives in the named volume)
 #   docker compose down -v        stop AND destroy the database
 #
-# Startup is ordered: db must report healthy, then `migrate` runs
-# `alembic upgrade head` and exits 0, and only then does api start. That
-# means the api never serves traffic against an un-migrated schema.
+# Startup is ordered: db must report healthy, then `db-roles` creates the
+# least-privilege roles (ADR-0010), then `migrate` runs `alembic upgrade head`
+# as careroute_migrate and exits 0, and only then does api start, as the
+# DML-only careroute_app. The api never serves traffic against an un-migrated
+# schema, and never holds a connection that can change it.
+#
+# The superuser (careroute) is used only by db-roles. All passwords here are
+# dev-only.
 
 services:
   db:
@@ -29,17 +34,30 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  migrate:
+  db-roles:
     build:
       context: .
       target: runtime
     image: careroute:local
-    container_name: careroute-migrate
+    container_name: careroute-db-roles
     environment:
-      DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      ADMIN_DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      MIGRATE_DB_PASSWORD: careroute-migrate-dev
+      APP_DB_PASSWORD: careroute-app-dev
     depends_on:
       db:
         condition: service_healthy
+    command: ["python", "scripts/db_roles.py"]
+    restart: "no"
+
+  migrate:
+    image: careroute:local
+    container_name: careroute-migrate
+    environment:
+      DATABASE_URL: postgresql+psycopg://careroute_migrate:careroute-migrate-dev@db:5432/careroute
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
     command: ["alembic", "upgrade", "head"]
     restart: "no"
 
@@ -53,7 +71,7 @@ services:
       - "8000:8000"
     environment:
       APP_ENV: local
-      DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      DATABASE_URL: postgresql+psycopg://careroute_app:careroute-app-dev@db:5432/careroute
       # Unset -> the app's built-in dev default. Override from the shell to
       # rehearse a secret rotation: JWT_SECRET=<new> docker compose up -d api
       JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-change-me}
