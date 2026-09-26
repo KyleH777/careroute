@@ -103,7 +103,7 @@ resource "azurerm_container_app" "api" {
 
     container {
       name   = "api"
-      image  = var.image
+      image  = var.app_image
       cpu    = 0.5
       memory = "1Gi"
 
@@ -175,7 +175,7 @@ resource "azurerm_container_app_job" "migrate" {
   template {
     container {
       name    = "migrate"
-      image   = var.image
+      image   = var.migrate_image
       cpu     = 0.5
       memory  = "1Gi"
       command = ["alembic", "upgrade", "head"]
@@ -237,7 +237,7 @@ resource "azurerm_container_app_job" "seed" {
   template {
     container {
       name    = "seed"
-      image   = var.image
+      image   = var.app_image
       cpu     = 0.5
       memory  = "1Gi"
       command = ["python", "scripts/seed.py", "--demo-deployment"]
@@ -299,7 +299,7 @@ resource "azurerm_container_app_job" "db_bootstrap" {
   template {
     container {
       name    = "db-bootstrap"
-      image   = var.image
+      image   = var.app_image
       cpu     = 0.25
       memory  = "0.5Gi"
       command = ["python", "scripts/db_roles.py"]

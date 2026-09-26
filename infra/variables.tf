@@ -4,15 +4,56 @@ variable "location" {
   default     = "centralus"
 }
 
-variable "image" {
-  description = "Container image to run. Pin to an immutable sha- tag published by CI, never :latest."
+# Images. No defaults on purpose: every apply must say which image each part
+# runs, so a forgotten -var fails instead of silently rolling back. Deploys
+# (CI, ADR-0011) set migrate_image first, run the migration, and only then
+# move app_image (ADR-0001). For infra-only changes, pass the live values:
+#
+#   terraform apply -var app_image=$(terraform output -raw app_image) \
+#                   -var migrate_image=$(terraform output -raw migrate_image)
+variable "app_image" {
+  description = "Image for the API, the seed job and the db-bootstrap job. An immutable sha- tag, never :latest."
   type        = string
-  default     = "ghcr.io/kyleh777/careroute:sha-da96d74"
 
   validation {
-    condition     = !endswith(var.image, ":latest")
+    condition     = !endswith(var.app_image, ":latest")
     error_message = "Pin an immutable sha- tag so every deploy is reproducible and rollback is a variable change."
   }
+}
+
+variable "migrate_image" {
+  description = "Image for the careroute-migrate job. Moves ahead of app_image during a deploy (ADR-0001)."
+  type        = string
+
+  validation {
+    condition     = !endswith(var.migrate_image, ":latest")
+    error_message = "Pin an immutable sha- tag so every deploy is reproducible and rollback is a variable change."
+  }
+}
+
+# Key Vault Secrets Officer goes to a fixed set of principals, not to "whoever
+# runs Terraform": otherwise the first CI apply would take it from the human
+# operator. Supplied via TF_VAR_operator_object_id (az ad signed-in-user show
+# --query id -o tsv), so no personal ID is committed.
+variable "operator_object_id" {
+  description = "Entra object ID of the human operator who keeps Key Vault Secrets Officer."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.operator_object_id))
+    error_message = "operator_object_id must be an Entra object ID (GUID)."
+  }
+}
+
+variable "ci_identity_name" {
+  description = "The CI deploy identity (created by infra/ci, ADR-0011)."
+  type        = string
+  default     = "careroute-ci-id"
+}
+
+variable "ci_resource_group" {
+  type    = string
+  default = "careroute-ci-rg"
 }
 
 variable "postgres_sku" {

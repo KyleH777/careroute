@@ -25,3 +25,13 @@ output "jobs" {
     db_bootstrap = azurerm_container_app_job.db_bootstrap.name
   }
 }
+
+output "app_image" {
+  description = "Image the API, seed and db-bootstrap run. Pass back as -var app_image for infra-only applies."
+  value       = var.app_image
+}
+
+output "migrate_image" {
+  description = "Image the migrate job runs."
+  value       = var.migrate_image
+}

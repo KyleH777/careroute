@@ -9,8 +9,13 @@
 #   ./backend-setup/setup-backend.sh
 #   export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 #   terraform init -backend-config=backend.hcl
-#   terraform plan -out=careroute.tfplan
-#   terraform apply careroute.tfplan
+#   export TF_VAR_operator_object_id=$(az ad signed-in-user show --query id -o tsv)
+#   terraform apply -var app_image=<sha- image> -var migrate_image=<sha- image>
+#
+# The CI identity (infra/ci) must exist first; it is applied separately and
+# only by a human. After the first deploy, CI applies this config on every
+# push to main (ADR-0011); humans making infra-only changes pass the live
+# images from `terraform output`. Never write plan files: they embed secrets.
 #
 # Resources are split by concern: network.tf, database.tf, keyvault.tf,
 # containerapps.tf. Inputs in variables.tf, outputs in outputs.tf.

@@ -27,11 +27,28 @@ resource "azurerm_user_assigned_identity" "app" {
   tags                = local.tags
 }
 
-# You (whoever runs terraform) write the secrets...
+# The operator and the CI deploy identity write the secrets...
+# The CI deploy identity lives in its own resource group (infra/ci), so CI
+# can't edit its own credentials. Referenced here only to grant it the same
+# secret-writing role the human operator has (ADR-0011).
+data "azurerm_user_assigned_identity" "ci" {
+  name                = var.ci_identity_name
+  resource_group_name = var.ci_resource_group
+}
+
+moved {
+  from = azurerm_role_assignment.deployer_secrets_officer
+  to   = azurerm_role_assignment.deployer_secrets_officer["operator"]
+}
+
 resource "azurerm_role_assignment" "deployer_secrets_officer" {
+  for_each = {
+    operator = var.operator_object_id
+    ci       = data.azurerm_user_assigned_identity.ci.principal_id
+  }
   scope                = azurerm_key_vault.main.id
   role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
+  principal_id         = each.value
 }
 
 # ...and the app's identity may only read them. Pre-ADR-0010 this was
