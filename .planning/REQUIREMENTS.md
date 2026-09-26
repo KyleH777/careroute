@@ -23,7 +23,7 @@
 
 ### Database Roles [R6]
 
-- [ ] **DB-01** [R6.1]: The app connects as a dedicated Postgres role with DML only. Only the migrate job uses a role that can alter the schema. Neither role is the server admin
+- [x] **DB-01** [R6.1]: The app connects as a dedicated Postgres role with DML only. Only the migrate job uses a role that can alter the schema. Neither role is the server admin
 
 ### Deploy Automation [R2]
 
@@ -76,7 +76,7 @@ None identified. The PRD lists no deferred-but-planned items. Future candidates 
 | DOCS-01 | Phase 1 | Complete |
 | DOCS-02 | Phase 1 | Complete |
 | DOCS-03 | Phase 1 | Complete |
-| DB-01 | Phase 2 | Pending |
+| DB-01 | Phase 2 | Complete |
 | DEPLOY-01 | Phase 3 | Pending |
 | DEPLOY-02 | Phase 3 | Pending |
 | DEPLOY-03 | Phase 3 | Pending |

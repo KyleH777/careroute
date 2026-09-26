@@ -21,7 +21,7 @@ CareRoute is already live on Azure (PRD R1, done 2026-09-24). This milestone mak
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Ops Docs Match Deployment** - AZURE, RUNBOOK and INCIDENT-RESPONSE describe the Terraform/Key Vault/private-Postgres system as built
-- [ ] **Phase 2: Least-Privilege Database Roles** - The app runs as a DML-only role; only the migrate job can alter schema; nobody uses the server admin
+- [x] **Phase 2: Least-Privilege Database Roles** - The app runs as a DML-only role; only the migrate job can alter schema; nobody uses the server admin
 - [ ] **Phase 3: Automated Ordered Deploys** - Every `main` push deploys via OIDC in ADR-0001 order, and a failed migration leaves the old revision serving
 - [ ] **Phase 4: Observability & Central Log Retention** - Request-correlated JSON logs, private `/metrics`, owner alerts, and retained logs in Log Analytics
 - [ ] **Phase 5: Login Hardening** - `/auth/token` is rate limited per IP and per account, and every attempt is logged
@@ -54,9 +54,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. The local Compose stack and CI tests use the same app/migrate role split, so a migration that forgets a grant fails CI before it reaches Azure.
   5. RUNBOOK/AZURE docs describe the roles, which workload uses which, and how to rotate each password.
 **Plans**: 3 plans
-- [ ] 02-01-PLAN.md — Idempotent `scripts/db_roles.py` + Compose/test/CI role split + privilege contract tests; rehearse the upgrade on admin-owned data (wave 1, local only)
-- [ ] 02-02-PLAN.md — Azure rollout in stages A/B/C: bootstrap job, per-workload identities, per-secret Key Vault RBAC; live evidence for criteria 1-3 (wave 2, checkpoints before push/apply/job runs)
-- [ ] 02-03-PLAN.md — ADR-0010 + AZURE/RUNBOOK/INCIDENT-RESPONSE/BACKUP-RESTORE/README for roles and rotation (wave 3)
+- [x] 02-01-PLAN.md — Idempotent `scripts/db_roles.py` + Compose/test/CI role split + privilege contract tests; rehearse the upgrade on admin-owned data (wave 1, local only)
+- [x] 02-02-PLAN.md — Azure rollout in stages A/B/C: bootstrap job, per-workload identities, per-secret Key Vault RBAC; live evidence for criteria 1-3 (wave 2, checkpoints before push/apply/job runs)
+- [x] 02-03-PLAN.md — ADR-0010 + AZURE/RUNBOOK/INCIDENT-RESPONSE/BACKUP-RESTORE/README for roles and rotation (wave 3)
 
 ### Phase 3: Automated Ordered Deploys
 **Goal**: Merging to `main` puts that commit's image live on Azure with no human steps. The migration always completes before any app revision serves the new code, and CI's Azure access is narrow and credential-free.
@@ -121,7 +121,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Ops Docs Match Deployment | 2/2 | Complete | 2026-09-25 |
-| 2. Least-Privilege Database Roles | 0/3 | Planned | - |
+| 2. Least-Privilege Database Roles | 3/3 | Complete | 2026-09-26 |
 | 3. Automated Ordered Deploys | 0/TBD | Not started | - |
 | 4. Observability & Central Log Retention | 0/TBD | Not started | - |
 | 5. Login Hardening | 0/TBD | Not started | - |

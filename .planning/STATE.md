@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-09-24)
 
 **Core value:** On every push to `main`, CI deploys the live demo automatically, in ADR-0001 order. When an incident happens, it can be detected, scoped and contained using docs that match the deployed system, all under ~$20/month.
-**Current focus:** Phase 2 - Least-Privilege Database Roles
+**Current focus:** Phase 3 - Automated Ordered Deploys
 
 ## Current Position
 
-Phase: 2 of 7 (Least-Privilege Database Roles)
-Plan: 1 of 3 complete; 02-02 paused before stage C
-Status: Paused (user break)
-Last activity: 2026-09-25 - 02-02 stages A+B applied and verified live; stage C awaiting approval
+Phase: 3 of 7 (Automated Ordered Deploys)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-09-26 - Phase 2 complete: least-privilege roles + per-workload identities live (stages A/B/C), docs + ADR-0010
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [███░░░░░░░] 29%
 
 ## Performance Metrics
 
@@ -57,7 +57,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 2] Role creation needs admin access from inside the VNet (no laptop `psql`, and the Terraform postgresql provider cannot reach a private server from outside). Plan an idempotent bootstrap job. Existing tables are owned by the admin, so ownership must be transferred to the migrate role.
 - [Phase 3] Hazard: a single `terraform apply` that updates both the migrate-job image and the app image would roll the app before migration (violates ADR-0001). The pipeline must stage this.
 - [Phase 3] Hazard: the CI OIDC identity can read all secrets via state. Needs a narrow federated subject, no tfplan artifacts, no plan output in logs.
 - [Phase 4] Alerting vs scale-to-zero: an external availability probe on `/ready` wakes the app and may keep a replica warm (cost). Research alert signal options (metric/log alerts vs availability tests) against the ~$20/month budget. The existing workspace has a 0.5 GB/day cap and 30-day retention.
@@ -75,8 +74,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: 02-02 Task 8 checkpoint (stage C approval). Live state: API/seed run as careroute_app, migrate as careroute_migrate, db-bootstrap is the only admin workload; API identity still has the legacy vault-wide Key Vault read.
-Resume: approve stage C (`legacy_vault_wide_app_access = false`, apply, restart the API, check /ready + role assignments), write 02-02-SUMMARY (evidence below), then 02-03 docs.
-02-02 evidence so far: ownership probe (datdba careroute_admin, CREATE on public, not super, PG 16.15; public owned by azure_pg_admin); CI green + image sha-da96d74; stage A 14 added/3 changed/0 destroyed; bootstrap created roles, 10 objects handed over; stage B 9 added/3 changed/1 destroyed (time_sleep); /ready 200 + worklist 200 after restart; migrate + seed jobs Succeeded on own identities; pg_stat_activity = careroute_app (API) + careroute_admin (the probe itself); app CREATE TABLE -> permission denied for schema public; API identity = vault-wide + database-url + jwt-secret.
-Unpushed: 6a9ee8a (infra), 74ec10e (stage B flag) + this state commit. Also found and fixed: snet-postgres Microsoft.Storage service-endpoint drift (declared in network.tf).
+Stopped at: Phase 2 complete. Next: `/gsd:plan-phase 3`. Phase 3 note: CI deploy identity needs to start jobs; per ADR-0010 that is effectively migrate/admin DB access, so scope it to the migrate job only (never db-bootstrap).
 Resume file: None
