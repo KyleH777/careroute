@@ -6,16 +6,20 @@ What to check, and what to run, when CareRoute misbehaves.
 symptoms and recovery, the missing-`JWT_SECRET` startup refusal, user
 lockout, secret rotation, the audit query, and the diagnostic commands. The
 restore is verified by the drill in BACKUP-RESTORE.md. **Not exercised
-here:** the schema-downgrade rollback (destructive), the Azure steps, and the
-disk-cleanup commands. Rehearse those on a copy before relying on them.
+here:** the schema-downgrade rollback (destructive) and the disk-cleanup
+commands. The **Azure** steps were checked against `az --help` and
+`infra/*.tf` on 2026-09-25 but not executed, to avoid cost and disruption to
+the live demo. Rehearse all of these on a copy before relying on them.
 
 For declaring an incident, severity, communication and follow-up, see
 **[INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)**. This runbook is the "how do I
 fix it" half; that doc is the "how do we run the incident" half.
 
-Commands assume the Compose stack from the repo root. For Azure, the same
-checks apply against the deployed URL; `docker compose` steps become their
-Azure equivalents (see [AZURE.md](AZURE.md)).
+Commands assume the Compose stack from the repo root. Where Azure differs,
+an **Azure** block follows. Azure has no `docker compose exec` and no laptop
+`psql`: the database is private, so queries run as a one-off job inside the
+VNet ([AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)).
+Get resource names with `cd infra && terraform output`.
 
 ---
 
@@ -29,6 +33,16 @@ curl -s -w ' [%{http_code}]\n' localhost:8000/health  # 2. is the process alive?
 curl -s -w ' [%{http_code}]\n' localhost:8000/ready   # 3. can it reach the database?
 docker compose logs api --since 15m | tail -50      # 4. what is it saying?
 docker compose logs migrate                         # 5. did the last migration succeed?
+```
+
+**Azure:**
+
+```bash
+API=$(cd infra && terraform output -raw api_url)                            # 1. the deployed URL
+curl -s -w ' [%{http_code}]\n' $API/health                                  # 2. alive? (first request cold-starts: a few seconds)
+curl -s -w ' [%{http_code}]\n' $API/ready                                   # 3. database reachable?
+az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 50   # 4. what is it saying?
+az containerapp job execution list -g careroute-rg -n careroute-migrate -o table      # 5. did the last migration succeed?
 ```
 
 | `/health` | `/ready` | Most likely | Go to |
@@ -77,7 +91,7 @@ docker compose exec db pg_isready -U careroute -d careroute
 | db container stopped/crashed | `docker compose start db` |
 | db container restarting in a loop | Read `docker compose logs db`. Often disk full (below) or a corrupted data directory ([Data loss](#data-loss-or-corruption)) |
 | Disk full | `docker system df`, then free space (see [Disk full](#disk-full)) |
-| Azure: connection refused/timeout | Check the server is running and the firewall rule allows the app's outbound IP (AZURE.md → Network access) |
+| Azure: connection refused/timeout | Check the server is running: `az postgres flexible-server show -g careroute-rg -n <server> --query state` (start it with `az postgres flexible-server start`). There are **no firewall rules**: the app reaches Postgres over the VNet and private DNS ([ADR-0007](adr/0007-private-postgres-in-centralus.md)). If the server is `Ready`, check `--type system` logs for DNS or network errors |
 | Azure: `SSL`/`sslmode` errors | `DATABASE_URL` must end in `?sslmode=require` |
 
 **Recovery is automatic.** You do **not** need to restart the api once the
@@ -122,7 +136,7 @@ docker compose logs api | grep -E "Error|JWT_SECRET" | head
 
 | Error | Meaning | Action |
 |---|---|---|
-| `JWT_SECRET must be set when APP_ENV='production'` | Deliberate refusal: a non-dev environment has no real signing secret | Set `JWT_SECRET` (AZURE.md → JWT signing secret) and restart. **Do not** "fix" it by setting `APP_ENV=local` in production |
+| `JWT_SECRET must be set when APP_ENV='production'` | Deliberate refusal: a non-dev environment has no real signing secret | Compose: set `JWT_SECRET` and restart. Azure: the value comes from Key Vault secret `jwt-secret`, so check the reference resolved (`az containerapp logs show ... --type system`) and that `careroute-app-id` still has Key Vault Secrets User ([AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation)). **Do not** "fix" it by setting `APP_ENV=local` in production |
 | `ValidationError ... Settings` (other) | Malformed environment variable | Compare against `.env.example` |
 | `Address already in use` | Port 8000 taken on the host | `lsof -i :8000`, stop the other process |
 
@@ -135,7 +149,7 @@ docker compose logs api | grep -E "Error|JWT_SECRET" | head
 | Status | Meaning | Check |
 |---|---|---|
 | **401** on every request | Tokens are being rejected | Did `JWT_SECRET` change? A rotation invalidates **every** outstanding token by design; users must log in again. Otherwise check the client is sending `Authorization: Bearer <token>` |
-| **401** for one user | Account deactivated, token expired (60 min), or wrong password | `docker compose exec db psql -U careroute -d careroute -c "select email, role, is_active from users where email='<email>';"` |
+| **401** for one user | Account deactivated, token expired (60 min), or wrong password | `docker compose exec db psql -U careroute -d careroute -c "select email, role, is_active from users where email='<email>';"` (Azure: the worked example in [AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)) |
 | **403** | Authenticated, wrong role | Working as designed. See README → Authentication for the role matrix |
 | **409** | A business rule rejected it | Working as designed. The `detail` field says which rule (illegal transition, specialty mismatch, provider not accepting, referral not open) |
 | **422** | Request body failed validation | Client bug. The response lists the offending fields |
@@ -165,19 +179,37 @@ docker compose exec db psql -U careroute -d careroute \
 
 Re-enable with `is_active = true`.
 
+**Azure:** the same `UPDATE`, run as an in-VNet one-off job
+([AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)),
+with `.commit()` after `execute`. This **writes to live data** as the server
+admin. Double-check the email before you run it.
+
 ### Invalidate everyone's tokens (suspected `JWT_SECRET` leak)
 
 Rotate the secret. Every existing token instantly fails signature checks.
 
+**Azure:** Terraform generates the new secret. Nobody types or sees it:
+
 ```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+cd infra && terraform apply -replace=random_password.jwt_secret
 ```
 
-Set it as `JWT_SECRET` in the environment (Azure: App Setting / Key Vault) and
-restart the api. With Compose:
+```bash
+az containerapp revision list -g careroute-rg -n careroute-api --query "[?properties.active].name" -o tsv
+```
 
 ```bash
-JWT_SECRET='<new-secret>' docker compose up -d api
+az containerapp revision restart -g careroute-rg -n careroute-api --revision <revision-name>
+```
+
+Container Apps would pick up the new version within 30 minutes on its own. The
+restart makes it immediate. Details in
+[AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation).
+
+**Compose (dev):**
+
+```bash
+JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" docker compose up -d api
 ```
 
 Verified: after rotation an old token gets 401 and a fresh login gets 200. Expect a burst of 401s as clients re-authenticate. That's
@@ -194,6 +226,9 @@ docker compose exec db psql -U careroute -d careroute -c "
   from referral_events where actor = '<email>'
   order by occurred_at desc limit 50;"
 ```
+
+Azure: run the same `select` as an in-VNet one-off job
+([AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)).
 
 **Know the gaps before you rely on this:** only status changes are logged.
 **Reads are not logged** (you cannot tell which patients an account viewed),
@@ -222,6 +257,10 @@ docker pull ghcr.io/kyleh777/careroute:sha-<good-sha>
 git checkout <good-sha> && docker compose up --build -d
 ```
 
+Azure: set `image` in `infra/variables.tf` back to
+`ghcr.io/kyleh777/careroute:sha-<good-sha>`, then `terraform apply`, and commit
+the change ([AZURE.md → Deploying a new image](AZURE.md#deploying-a-new-image)).
+
 **2b. A migration changed:** roll the **schema** back first, using the **new**
 image (only it contains the downgrade code), then deploy the old image.
 
@@ -229,6 +268,19 @@ image (only it contains the downgrade code), then deploy the old image.
 ./scripts/backup.sh pre-rollback                                   # always, first
 docker compose run --rm migrate alembic current                   # where are we?
 docker compose run --rm migrate alembic downgrade <good-revision>  # e.g. 0f4937d2a980
+```
+
+Azure: there is no `backup.sh`. Instead, **write down the current UTC time**
+as your point-in-time-restore target. Then run the downgrade with the **bad**
+(newer) image through the migrate job, and only after it succeeds roll the image
+back as in 2a:
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<bad-sha> --command alembic --args downgrade <good-revision>
+```
+
+```bash
+az containerapp job logs show -g careroute-rg -n careroute-migrate --container migrate
 ```
 
 > ⚠️ **A downgrade can destroy data.** Downgrading past `add users table`
@@ -258,9 +310,12 @@ if you pick the wrong restore point.
 
 - Restore replaces **everything** since the backup. Anything written after it
   is lost unless you replay it.
-- **Azure:** prefer point-in-time restore to a *new* server (AZURE.md →
-  Backups on Azure). It doesn't overwrite the live database, and it can recover
-  to the minute before the bad change.
+- **Azure:** `backup.sh`/`restore.sh` don't apply (Compose only). Use
+  point-in-time restore to a *new* server
+  ([AZURE.md → Backups and restore](AZURE.md#backups-and-restore)). It doesn't
+  overwrite the live database, and it can recover to the minute before the bad
+  change. Cutting the app over to the restored server isn't scripted yet (see
+  the known gaps there).
 
 ---
 
@@ -290,8 +345,8 @@ object storage.
 | Tests & migrations → pytest | A test failed | Run the test stack locally (README → Running tests) |
 | Build, scan & publish → Trivy | A **fixable** HIGH/CRITICAL CVE is in the image | The log names the package and fixed version. Bump it in `requirements.txt`, or rebuild to pick up a patched base image |
 
-A red Trivy job means **nothing was published**. The last good image is still
-`:latest`, so production is unaffected.
+A red Trivy job means **nothing was published**. Production runs the pinned
+`sha-` tag in `infra/variables.tf`, not `:latest`, so it is unaffected either way.
 
 ---
 
@@ -306,3 +361,9 @@ A red Trivy job means **nothing was published**. The last good image is still
 | Current schema revision | `docker compose run --rm migrate alembic current` |
 | Row counts | `curl -s localhost:8000/stats` |
 | Published images | `ghcr.io/kyleh777/careroute:latest`, `:sha-<commit>` |
+| Azure: names and URL | `cd infra && terraform output` |
+| Azure: logs | `az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 100` (older: Log Analytics `ContainerAppConsoleLogs_CL`, 30-day retention) |
+| Azure: SQL | In-VNet one-off job ([AZURE.md](AZURE.md#querying-the-database-from-inside-the-vnet)) |
+| Azure: current schema revision | `az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --command alembic --args current`, then `az containerapp job logs show ... --container migrate` |
+| Azure: job history | `az containerapp job execution list -g careroute-rg -n careroute-migrate -o table` |
+| Azure: running image | `az containerapp show -g careroute-rg -n careroute-api --query "properties.template.containers[0].image" -o tsv` |
