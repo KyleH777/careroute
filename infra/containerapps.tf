@@ -1,8 +1,11 @@
-# The API, plus two one-shot jobs mirroring docker-compose.yml's pattern:
+# The API, plus one-shot jobs mirroring docker-compose.yml's pattern:
 #
-#   careroute-migrate   alembic upgrade head. Run before each release,
-#                       the same role the `migrate` service plays locally.
-#   careroute-seed      synthetic demo data + demo logins (--demo-deployment).
+#   careroute-db-bootstrap  scripts/db_roles.py as the server admin: creates
+#                           the least-privilege roles and syncs their
+#                           passwords (ADR-0010). The only admin workload.
+#   careroute-migrate       alembic upgrade head. Run before each release,
+#                           the same role the `migrate` service plays locally.
+#   careroute-seed          synthetic demo data + demo logins (--demo-deployment).
 #
 # Jobs are manual-trigger, so `terraform apply` never runs them implicitly:
 #
@@ -51,6 +54,15 @@ locals {
     DATABASE_URL = "database-url"
     JWT_SECRET   = "jwt-secret"
   }
+
+  # Stage B (var.db_roles_enabled) moves the jobs onto their own identities,
+  # and migrate onto the schema-owner role (ADR-0010).
+  migrate_identity = var.db_roles_enabled ? local.workload_identity.migrate : azurerm_user_assigned_identity.app
+  migrate_env_secret = {
+    DATABASE_URL = var.db_roles_enabled ? "database-url-migrate" : "database-url"
+    JWT_SECRET   = "jwt-secret"
+  }
+  seed_identity = var.db_roles_enabled ? local.workload_identity.seed : azurerm_user_assigned_identity.app
 }
 
 resource "azurerm_container_app" "api" {
@@ -128,7 +140,7 @@ resource "azurerm_container_app" "api" {
 
   tags = local.tags
 
-  depends_on = [time_sleep.rbac_propagation]
+  depends_on = [time_sleep.rbac_propagation, time_sleep.workload_rbac_propagation]
 }
 
 resource "azurerm_container_app_job" "migrate" {
@@ -148,15 +160,15 @@ resource "azurerm_container_app_job" "migrate" {
 
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.app.id]
+    identity_ids = [local.migrate_identity.id]
   }
 
   dynamic "secret" {
-    for_each = { for k, v in local.kv_secret_ids : k => v if contains(values(local.app_env_secret), k) }
+    for_each = { for k, v in local.kv_secret_ids : k => v if contains(values(local.migrate_env_secret), k) }
     content {
       name                = secret.key
       key_vault_secret_id = secret.value
-      identity            = azurerm_user_assigned_identity.app.id
+      identity            = local.migrate_identity.id
     }
   }
 
@@ -176,7 +188,7 @@ resource "azurerm_container_app_job" "migrate" {
         }
       }
       dynamic "env" {
-        for_each = local.app_env_secret
+        for_each = local.migrate_env_secret
         content {
           name        = env.key
           secret_name = env.value
@@ -187,7 +199,7 @@ resource "azurerm_container_app_job" "migrate" {
 
   tags = local.tags
 
-  depends_on = [time_sleep.rbac_propagation]
+  depends_on = [time_sleep.rbac_propagation, time_sleep.workload_rbac_propagation]
 }
 
 resource "azurerm_container_app_job" "seed" {
@@ -207,17 +219,18 @@ resource "azurerm_container_app_job" "seed" {
 
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.app.id]
+    identity_ids = [local.seed_identity.id]
   }
 
   # Needs the private demo passwords too: seed.py refuses a demo deployment
-  # unless the write-capable logins get non-published passwords.
+  # unless the write-capable logins get non-published passwords. Seeding is
+  # plain INSERTs, so it runs as the DML-only app role.
   dynamic "secret" {
-    for_each = local.kv_secret_ids
+    for_each = { for k, v in local.kv_secret_ids : k => v if contains(local.workload_secrets.seed, k) }
     content {
       name                = secret.key
       key_vault_secret_id = secret.value
-      identity            = azurerm_user_assigned_identity.app.id
+      identity            = local.seed_identity.id
     }
   }
 
@@ -251,5 +264,73 @@ resource "azurerm_container_app_job" "seed" {
 
   tags = local.tags
 
-  depends_on = [time_sleep.rbac_propagation]
+  depends_on = [time_sleep.rbac_propagation, time_sleep.workload_rbac_propagation]
+}
+
+resource "azurerm_container_app_job" "db_bootstrap" {
+  name                         = "${local.name}-db-bootstrap"
+  location                     = azurerm_resource_group.app.location
+  resource_group_name          = azurerm_resource_group.app.name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  workload_profile_name        = "Consumption"
+
+  replica_timeout_in_seconds = 300
+  replica_retry_limit        = 0
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [local.workload_identity.dbbootstrap.id]
+  }
+
+  dynamic "secret" {
+    for_each = { for k, v in local.kv_secret_ids : k => v if contains(local.workload_secrets.dbbootstrap, k) }
+    content {
+      name                = secret.key
+      key_vault_secret_id = secret.value
+      identity            = local.workload_identity.dbbootstrap.id
+    }
+  }
+
+  template {
+    container {
+      name    = "db-bootstrap"
+      image   = var.image
+      cpu     = 0.25
+      memory  = "0.5Gi"
+      command = ["python", "scripts/db_roles.py"]
+
+      # No APP_ENV/JWT: db_roles.py doesn't import the app.
+      dynamic "env" {
+        for_each = {
+          PYTHONUNBUFFERED = "1"
+          MIGRATE_DB_ROLE  = local.db_role_migrate
+          APP_DB_ROLE      = local.db_role_app
+        }
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = {
+          ADMIN_DATABASE_URL  = "database-url-admin"
+          MIGRATE_DB_PASSWORD = "db-migrate-password"
+          APP_DB_PASSWORD     = "db-app-password"
+        }
+        content {
+          name        = env.key
+          secret_name = env.value
+        }
+      }
+    }
+  }
+
+  tags = local.tags
+
+  depends_on = [time_sleep.workload_rbac_propagation]
 }

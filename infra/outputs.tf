@@ -20,7 +20,8 @@ output "postgres_fqdn" {
 output "jobs" {
   description = "Manual-trigger jobs: az containerapp job start -g <resource_group> -n <name>"
   value = {
-    migrate = azurerm_container_app_job.migrate.name
-    seed    = azurerm_container_app_job.seed.name
+    migrate      = azurerm_container_app_job.migrate.name
+    seed         = azurerm_container_app_job.seed.name
+    db_bootstrap = azurerm_container_app_job.db_bootstrap.name
   }
 }

@@ -43,3 +43,21 @@ resource "azurerm_postgresql_flexible_server_database" "careroute" {
   charset   = "UTF8"
   collation = "en_US.utf8"
 }
+
+# Least-privilege roles (ADR-0010). Created and kept in sync by the
+# careroute-db-bootstrap job (scripts/db_roles.py); Terraform only generates
+# the passwords. Replacing one rotates it: apply, then run db-bootstrap.
+locals {
+  db_role_migrate = "careroute_migrate"
+  db_role_app     = "careroute_app"
+}
+
+resource "random_password" "pg_migrate" {
+  length  = 32
+  special = false # embedded in a URL
+}
+
+resource "random_password" "pg_app" {
+  length  = 32
+  special = false # embedded in a URL
+}

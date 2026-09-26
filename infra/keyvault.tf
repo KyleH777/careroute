@@ -34,8 +34,16 @@ resource "azurerm_role_assignment" "deployer_secrets_officer" {
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
-# ...and the app's identity may only read them.
+# ...and the app's identity may only read them. Pre-ADR-0010 this was
+# vault-wide; per-secret grants now live in identities.tf, and stage C drops
+# this one (var.legacy_vault_wide_app_access = false).
+moved {
+  from = azurerm_role_assignment.app_secrets_user
+  to   = azurerm_role_assignment.app_secrets_user[0]
+}
+
 resource "azurerm_role_assignment" "app_secrets_user" {
+  count                = var.legacy_vault_wide_app_access ? 1 : 0
   scope                = azurerm_key_vault.main.id
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_user_assigned_identity.app.principal_id
@@ -65,14 +73,30 @@ resource "random_password" "demo_coordinator" {
 }
 
 locals {
-  secrets = {
-    "database-url" = format(
+  db_url = {
+    for role, pw in {
+      (azurerm_postgresql_flexible_server.main.administrator_login) = random_password.postgres_admin.result
+      (local.db_role_migrate)                                       = random_password.pg_migrate.result
+      (local.db_role_app)                                           = random_password.pg_app.result
+      } : role => format(
       "postgresql+psycopg://%s:%s@%s:5432/%s?sslmode=require",
-      azurerm_postgresql_flexible_server.main.administrator_login,
-      random_password.postgres_admin.result,
+      role,
+      pw,
       azurerm_postgresql_flexible_server.main.fqdn,
       azurerm_postgresql_flexible_server_database.careroute.name,
     )
+  }
+  admin_db_url = local.db_url[azurerm_postgresql_flexible_server.main.administrator_login]
+
+  secrets = {
+    # What the API (and seed) connect with: the DML-only role once stage B is
+    # on, the server admin before that.
+    "database-url"         = var.db_roles_enabled ? local.db_url[local.db_role_app] : local.admin_db_url
+    "database-url-migrate" = local.db_url[local.db_role_migrate]
+    "database-url-admin"   = local.admin_db_url # db-bootstrap only
+    "db-migrate-password"  = random_password.pg_migrate.result
+    "db-app-password"      = random_password.pg_app.result
+
     "jwt-secret"                = random_password.jwt_secret.result
     "demo-clinician-password"   = random_password.demo_clinician.result
     "demo-coordinator-password" = random_password.demo_coordinator.result

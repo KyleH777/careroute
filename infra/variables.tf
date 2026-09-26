@@ -7,7 +7,7 @@ variable "location" {
 variable "image" {
   description = "Container image to run. Pin to an immutable sha- tag published by CI, never :latest."
   type        = string
-  default     = "ghcr.io/kyleh777/careroute:sha-e15d28f"
+  default     = "ghcr.io/kyleh777/careroute:sha-da96d74"
 
   validation {
     condition     = !endswith(var.image, ":latest")
@@ -30,4 +30,25 @@ variable "api_min_replicas" {
 variable "api_max_replicas" {
   type    = number
   default = 2
+}
+
+# Least-privilege rollout (ADR-0010), in stages so no single apply can break
+# the live API:
+#   A  db_roles_enabled = false  add role passwords, secrets, identities and
+#                                the db-bootstrap job; run it. Nothing live
+#                                changes credentials.
+#   B  db_roles_enabled = true   API/seed use careroute_app, migrate uses
+#                                careroute_migrate, each on its own identity.
+#   C  legacy_vault_wide_app_access = false
+#                                drop the API identity's vault-wide read.
+variable "db_roles_enabled" {
+  description = "Switch workloads to the least-privilege Postgres roles and per-workload identities (stage B). Run careroute-db-bootstrap first."
+  type        = bool
+  default     = false
+}
+
+variable "legacy_vault_wide_app_access" {
+  description = "Keep the pre-ADR-0010 vault-wide Key Vault Secrets User for the API identity. Set false once per-secret access is live (stage C)."
+  type        = bool
+  default     = true
 }

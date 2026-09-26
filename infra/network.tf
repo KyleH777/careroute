@@ -31,6 +31,11 @@ resource "azurerm_subnet" "postgres" {
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.20.2.0/24"]
 
+  # Present on the live subnet though never declared here (found as drift on
+  # 2026-09-25). Declared rather than removed: stripping a service endpoint
+  # from under the running server is not a change to make blind.
+  service_endpoints = ["Microsoft.Storage"]
+
   delegation {
     name = "postgres-flexible"
     service_delegation {
