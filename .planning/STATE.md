@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-09-24)
 ## Current Position
 
 Phase: 3 of 7 (Automated Ordered Deploys)
-Plan: 0 of 3 in current phase
-Status: Ready to execute
-Last activity: 2026-09-26 - Phase 3 planned (3 plans); user chose CI-runs-Terraform
+Plan: 1 of 3 complete; 03-02 paused after first deploy attempt
+Status: Paused (user request)
+Last activity: 2026-09-26 - First automated deploy (run 36261898752) failed at OIDC login; Azure untouched
 
 Progress: [███░░░░░░░] 29%
 
@@ -75,5 +75,6 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 3 planned. Next: `/gsd:execute-phase 3` (checkpoints: applies, GitHub env, push, drill)
+Stopped at: 03-02 Task 4. Pushed c3bb05b; CI lint/test/image green (image sha-c3bb05b published); deploy failed at `azure/login`: AADSTS700213. Cause: the repo's OIDC subject uses GitHub's immutable-ID format `repo:KyleH777@88053223/careroute@1383757448:environment:production`, but infra/ci's federated credential expects `repo:KyleH777/careroute:environment:production`. No Terraform/job ran; the API is still on sha-da96d74.
+Resume: (1) change infra/ci subject to the ID form (make var github_repo -> github_subject_repo = "KyleH777@88053223/careroute@1383757448"), human-apply infra/ci (1 in-place/replace of the federated credential); (2) re-run the deploy: `gh run rerun 36261898752 --failed -R KyleH777/careroute`; (3) evidence for criteria 1/2/4; (4) drill checkpoint; (5) 03-03 docs (note the subject format in ADR-0011/RUNBOOK "CI is red": AADSTS700213 = subject mismatch).
 Resume file: None
