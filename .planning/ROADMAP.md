@@ -68,7 +68,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. In a deliberate failing-migration drill, the workflow stops at the migrate step and marks the run failed. The previously active revision keeps serving `/ready` 200, and no new app revision is created.
   4. GitHub holds no Azure client secret or credential. CI signs in via OIDC federation whose subject is restricted to `main` (or a protected `production` environment), so pull-request and fork workflows cannot obtain the identity. Role assignments are scoped to `careroute-rg` plus the state container in `careroute-tfstate-rg`, not the subscription.
   5. The CI identity's ability to read every secret via Terraform state (ADR-0006/0008) is explicitly accepted and documented. The workflow never uploads a `*.tfplan` as an artifact, never prints plan content containing secret values, and the runbook's "who can read secrets" list includes the CI identity.
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 03-01-PLAN.md — Split app/migrate image vars (required), stable Secrets Officer set, CI identity in its own human-applied root with bounded roles (wave 1)
+- [ ] 03-02-PLAN.md — OIDC deploy job: stage-1 apply → migrate exit 0 → stage-2 apply → smoke; serialized; live deploy + failing-migration drill (wave 2)
+- [ ] 03-03-PLAN.md — ADR-0011 (accepted secret-read risk) + AZURE/RUNBOOK/INCIDENT-RESPONSE/README (wave 3)
 
 ### Phase 4: Observability & Central Log Retention
 **Goal**: When something goes wrong, the owner is told, and can trace any request and query application and audit logs centrally long after the container that wrote them is gone.
@@ -122,7 +125,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Ops Docs Match Deployment | 2/2 | Complete | 2026-09-25 |
 | 2. Least-Privilege Database Roles | 3/3 | Complete | 2026-09-26 |
-| 3. Automated Ordered Deploys | 0/TBD | Not started | - |
+| 3. Automated Ordered Deploys | 0/3 | Planned | - |
 | 4. Observability & Central Log Retention | 0/TBD | Not started | - |
 | 5. Login Hardening | 0/TBD | Not started | - |
 | 6. PHI Read-Access Audit | 0/TBD | Not started | - |

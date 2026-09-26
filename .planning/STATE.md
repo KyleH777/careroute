@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-09-24)
 ## Current Position
 
 Phase: 3 of 7 (Automated Ordered Deploys)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-09-26 - Phase 2 complete: least-privilege roles + per-workload identities live (stages A/B/C), docs + ADR-0010
+Plan: 0 of 3 in current phase
+Status: Ready to execute
+Last activity: 2026-09-26 - Phase 3 planned (3 plans); user chose CI-runs-Terraform
 
 Progress: [███░░░░░░░] 29%
 
@@ -45,6 +45,7 @@ Recent decisions affecting current work:
 - [Roadmap]: R8 docs first, so later phases amend accurate runbooks
 - [Roadmap]: R6 DB roles before R2 CI deploy, so the pipeline automates the final credential/Terraform shape
 - [Phase 1]: Azure restore = PITR to new server; cutover and in-VNet logical dumps are documented gaps
+- [Phase 3]: CI runs Terraform (user choice over image-only model); accepted risk: CI reads all secrets; bounded by separate CI RG, constrained RBAC Admin, container-scoped state access
 - [Phase 2]: Split identities per workload + per-secret Key Vault RBAC (user choice); ADR-0010 amends ADR-0008
 - [Phase 2]: PG16 bootstrap order: GRANT migrate TO admin WITH SET TRUE → schema CREATE → ALTER OWNER → SET ROLE migrate for grants/default privileges
 - [Phase 1]: Container Apps job overrides replace the whole container: always pass --image, --env-vars (secretref) and --command. Phase 3 CI must do the same
@@ -74,5 +75,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 2 complete. Next: `/gsd:plan-phase 3`. Phase 3 note: CI deploy identity needs to start jobs; per ADR-0010 that is effectively migrate/admin DB access, so scope it to the migrate job only (never db-bootstrap).
+Stopped at: Phase 3 planned. Next: `/gsd:execute-phase 3` (checkpoints: applies, GitHub env, push, drill)
 Resume file: None
