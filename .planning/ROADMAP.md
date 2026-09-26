@@ -39,7 +39,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Every Azure procedure in `docs/RUNBOOK.md` works against the live deployment. That covers checking health/readiness, reading logs, running migrations via `careroute-migrate`, rotating a secret through Terraform/Key Vault, and restoring through an in-VNet job instead of laptop `psql`. The firewall-rule check is gone.
   3. The credential rotation steps in `docs/INCIDENT-RESPONSE.md` (including the `JWT_SECRET` "invalidate all tokens" lever and the DB password) name the Terraform `random_password` / Key Vault path and the step that makes running revisions pick up the new value.
   4. A reviewer grepping the three docs finds no instruction that contradicts ADR-0006, 0007 or 0008.
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 01-01-PLAN.md — Rewrite docs/AZURE.md as-built (Terraform, centralus, private PG, Key Vault) + fix README's stale Azure/Terraform claims (wave 1)
+- [ ] 01-02-PLAN.md — Azure paths in RUNBOOK, Terraform/Key Vault rotation in INCIDENT-RESPONSE, cross-doc ADR audit (wave 2)
 
 ### Phase 2: Least-Privilege Database Roles
 **Goal**: The live API can only read and write data. Only the migrate job can change schema, and the Postgres server admin is not used by any running workload.
@@ -115,7 +117,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Ops Docs Match Deployment | 0/TBD | Not started | - |
+| 1. Ops Docs Match Deployment | 0/2 | Planned | - |
 | 2. Least-Privilege Database Roles | 0/TBD | Not started | - |
 | 3. Automated Ordered Deploys | 0/TBD | Not started | - |
 | 4. Observability & Central Log Retention | 0/TBD | Not started | - |
