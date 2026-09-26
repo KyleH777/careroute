@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-09-24)
 ## Current Position
 
 Phase: 2 of 7 (Least-Privilege Database Roles)
-Plan: 0 of 3 in current phase
-Status: Ready to execute
-Last activity: 2026-09-25 - Phase 2 planned (3 plans, 3 waves); PG16 role model proven in local spike
+Plan: 1 of 3 complete; 02-02 paused before stage C
+Status: Paused (user break)
+Last activity: 2026-09-25 - 02-02 stages A+B applied and verified live; stage C awaiting approval
 
 Progress: [█░░░░░░░░░] 14%
 
@@ -75,5 +75,8 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 2 planned. Next: `/gsd:execute-phase 2` (02-02 has blocking checkpoints before push, each apply and job runs)
+Stopped at: 02-02 Task 8 checkpoint (stage C approval). Live state: API/seed run as careroute_app, migrate as careroute_migrate, db-bootstrap is the only admin workload; API identity still has the legacy vault-wide Key Vault read.
+Resume: approve stage C (`legacy_vault_wide_app_access = false`, apply, restart the API, check /ready + role assignments), write 02-02-SUMMARY (evidence below), then 02-03 docs.
+02-02 evidence so far: ownership probe (datdba careroute_admin, CREATE on public, not super, PG 16.15; public owned by azure_pg_admin); CI green + image sha-da96d74; stage A 14 added/3 changed/0 destroyed; bootstrap created roles, 10 objects handed over; stage B 9 added/3 changed/1 destroyed (time_sleep); /ready 200 + worklist 200 after restart; migrate + seed jobs Succeeded on own identities; pg_stat_activity = careroute_app (API) + careroute_admin (the probe itself); app CREATE TABLE -> permission denied for schema public; API identity = vault-wide + database-url + jwt-secret.
+Unpushed: 6a9ee8a (infra), 74ec10e (stage B flag) + this state commit. Also found and fixed: snet-postgres Microsoft.Storage service-endpoint drift (declared in network.tf).
 Resume file: None
