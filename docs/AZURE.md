@@ -19,9 +19,11 @@ has a bug.
 > the outputs the commands below rely on.
 
 **How the commands on this page were checked:** every `az` and `terraform`
-command was checked against `--help` and `infra/*.tf` on 2026-09-25, but not
-executed against the live deployment, to avoid cost and disruption to the
-public demo. Treat them as reviewed, not rehearsed.
+command was checked against `--help` and `infra/*.tf` on 2026-09-25. Three
+paths were then **run against the live deployment**: console logs, the in-VNet
+query, and `alembic current`. Rotation, restore, deploys and downgrades were
+not run, to avoid cost and disruption to the public demo. Treat those as
+reviewed, not rehearsed.
 
 ---
 
@@ -146,10 +148,17 @@ matters**: migrate with the new image first, then roll the app
 ([ADR-0001](adr/0001-one-shot-migration-before-api.md)).
 
 **1. Run the new image's migrations**, overriding the job's image for this one
-execution:
+execution. An override **replaces the job's whole container definition**, so
+the command and environment must be passed again. Without them the job starts
+the image's default command, which is the API server, with no database URL.
+Set the environment once per shell:
 
 ```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<new>
+JOB_ENV=(APP_ENV=production PYTHONUNBUFFERED=1 DATABASE_URL=secretref:database-url JWT_SECRET=secretref:jwt-secret)
+```
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<new> --env-vars "${JOB_ENV[@]}" --command alembic --args upgrade head
 ```
 
 ```bash
@@ -214,6 +223,11 @@ az containerapp logs show -g careroute-rg -n careroute-api --type console --tail
 Add `--follow` to stream. Use `--type system` for platform events such as
 image pulls, probe failures, Key Vault reference errors and restarts.
 
+`logs show` streams from a **running replica**. If the API has scaled to zero,
+it starts one (seen 2026-09-25), which costs a few seconds of compute and shows
+only that fresh replica's output. For anything that happened before, use Log
+Analytics, below.
+
 A job's output (defaults to its latest execution):
 
 ```bash
@@ -243,24 +257,46 @@ Two limits to know during an incident:
 ## Querying the database from inside the VNet
 
 A laptop can't reach the database: it has no public endpoint, by design. To
-run a one-off query, start the migrate job with a **command override**. The
-override runs inside the VNet, with the app's `DATABASE_URL`. The image has
-Python, SQLAlchemy and psycopg, but no shell and no `psql`.
+run a one-off query, start the migrate job with a **command override**. It
+runs inside the VNet. The image has Python, SQLAlchemy and psycopg, but no
+shell and no `psql`.
+
+Three rules, all learned by running it:
+- An override replaces the whole container, so pass `--image` and the
+  environment (`JOB_ENV`, from [Deploying a new image](#deploying-a-new-image))
+  every time. Without them it fails with `Image property` or
+  `KeyError: 'DATABASE_URL'`.
+- Attach Python's `-c` to the code, as in `"-cimport ..."`. A bare `-c` is
+  parsed by `az` as its own flag and rejected.
+- Take the image from the job, so the query runs the deployed code:
+
+```bash
+IMG=$(az containerapp job show -g careroute-rg -n careroute-migrate --query "properties.template.containers[0].image" -o tsv)
+```
 
 Example: look up one account (read-only):
 
 ```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --command python --args -c "import os, sqlalchemy as sa; e = sa.create_engine(os.environ['DATABASE_URL']); print(e.connect().execute(sa.text(\"select email, role, is_active from users where email = 'someone@example.com'\")).all())"
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image "$IMG" --env-vars "${JOB_ENV[@]}" --command python --args "-cimport os, sqlalchemy as sa; e = sa.create_engine(os.environ['DATABASE_URL']); print(e.connect().execute(sa.text(\"select email, role, is_active from users where email = 'someone@example.com'\")).all())" --query name -o tsv
 ```
 
-Then read the output:
+That prints the execution name. When
+`az containerapp job execution show -g careroute-rg -n careroute-migrate --job-execution-name <name> --query properties.status -o tsv`
+says `Succeeded` (a few seconds of run time, plus a minute or two of
+scheduling), read the output:
 
 ```bash
-az containerapp job logs show -g careroute-rg -n careroute-migrate --container migrate
+az containerapp job logs show -g careroute-rg -n careroute-migrate --container migrate --execution <name> --format text
 ```
 
-Status: syntax-checked against `az containerapp job start --help`, not yet
-executed.
+The current schema revision, the same way:
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image "$IMG" --env-vars "${JOB_ENV[@]}" --command alembic --args current --query name -o tsv
+```
+
+Status: **rehearsed on 2026-09-25**. The account lookup returned the demo
+viewer row, and `alembic current` returned `a6ca29d19c0c (head)`.
 
 Know what you're doing when you use this:
 - It connects as the **server admin** (the app has no least-privilege role

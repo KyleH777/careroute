@@ -20,7 +20,7 @@ CareRoute is already live on Azure (PRD R1, done 2026-09-24). This milestone mak
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Ops Docs Match Deployment** - AZURE, RUNBOOK and INCIDENT-RESPONSE describe the Terraform/Key Vault/private-Postgres system as built
+- [x] **Phase 1: Ops Docs Match Deployment** - AZURE, RUNBOOK and INCIDENT-RESPONSE describe the Terraform/Key Vault/private-Postgres system as built
 - [ ] **Phase 2: Least-Privilege Database Roles** - The app runs as a DML-only role; only the migrate job can alter schema; nobody uses the server admin
 - [ ] **Phase 3: Automated Ordered Deploys** - Every `main` push deploys via OIDC in ADR-0001 order, and a failed migration leaves the old revision serving
 - [ ] **Phase 4: Observability & Central Log Retention** - Request-correlated JSON logs, private `/metrics`, owner alerts, and retained logs in Log Analytics
@@ -117,7 +117,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Ops Docs Match Deployment | 2/2 | Needs Review (live rehearsal) | - |
+| 1. Ops Docs Match Deployment | 2/2 | Complete | 2026-09-25 |
 | 2. Least-Privilege Database Roles | 0/TBD | Not started | - |
 | 3. Automated Ordered Deploys | 0/TBD | Not started | - |
 | 4. Observability & Central Log Retention | 0/TBD | Not started | - |

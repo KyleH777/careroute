@@ -8,8 +8,10 @@ lockout, secret rotation, the audit query, and the diagnostic commands. The
 restore is verified by the drill in BACKUP-RESTORE.md. **Not exercised
 here:** the schema-downgrade rollback (destructive) and the disk-cleanup
 commands. The **Azure** steps were checked against `az --help` and
-`infra/*.tf` on 2026-09-25 but not executed, to avoid cost and disruption to
-the live demo. Rehearse all of these on a copy before relying on them.
+`infra/*.tf` on 2026-09-25. The log read, the in-VNet query (user lookup) and
+`alembic current` were then run against the live deployment. Rotation,
+rollback/downgrade and restore were not, to avoid cost and disruption to the
+live demo. Rehearse all of these on a copy before relying on them.
 
 For declaring an incident, severity, communication and follow-up, see
 **[INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)**. This runbook is the "how do I
@@ -270,13 +272,14 @@ docker compose run --rm migrate alembic current                   # where are we
 docker compose run --rm migrate alembic downgrade <good-revision>  # e.g. 0f4937d2a980
 ```
 
-Azure: there is no `backup.sh`. Instead, **write down the current UTC time**
+Azure (`JOB_ENV` is defined in [AZURE.md → Deploying a new image](AZURE.md#deploying-a-new-image);
+an override without it runs with no database URL): there is no `backup.sh`. Instead, **write down the current UTC time**
 as your point-in-time-restore target. Then run the downgrade with the **bad**
 (newer) image through the migrate job, and only after it succeeds roll the image
 back as in 2a:
 
 ```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<bad-sha> --command alembic --args downgrade <good-revision>
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<bad-sha> --env-vars "${JOB_ENV[@]}" --command alembic --args downgrade <good-revision>
 ```
 
 ```bash
@@ -362,8 +365,8 @@ A red Trivy job means **nothing was published**. Production runs the pinned
 | Row counts | `curl -s localhost:8000/stats` |
 | Published images | `ghcr.io/kyleh777/careroute:latest`, `:sha-<commit>` |
 | Azure: names and URL | `cd infra && terraform output` |
-| Azure: logs | `az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 100` (older: Log Analytics `ContainerAppConsoleLogs_CL`, 30-day retention) |
+| Azure: logs | `az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 100` (live replica only; wakes the app if it's scaled to zero. Older: Log Analytics `ContainerAppConsoleLogs_CL`, 30-day retention) |
 | Azure: SQL | In-VNet one-off job ([AZURE.md](AZURE.md#querying-the-database-from-inside-the-vnet)) |
-| Azure: current schema revision | `az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --command alembic --args current`, then `az containerapp job logs show ... --container migrate` |
+| Azure: current schema revision | `alembic current` through a job override, with `--image` and `--env-vars` ([AZURE.md](AZURE.md#querying-the-database-from-inside-the-vnet)) |
 | Azure: job history | `az containerapp job execution list -g careroute-rg -n careroute-migrate -o table` |
 | Azure: running image | `az containerapp show -g careroute-rg -n careroute-api --query "properties.template.containers[0].image" -o tsv` |

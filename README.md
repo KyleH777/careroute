@@ -289,8 +289,8 @@ object storage, never in version control.
 
 - **[On-call runbook](docs/RUNBOOK.md)**: symptoms, diagnosis and fixes for
   database outages, failed starts, auth failures, rollbacks, restores and red
-  CI. The Compose procedures were run against this stack; the Azure ones are
-  syntax-checked, not yet rehearsed.
+  CI. The Compose procedures were run against this stack; of the Azure ones, the
+  log read and in-VNet database query were rehearsed live, and the rest are syntax-checked.
 - **[Architecture decisions](docs/adr/README.md)**: why it's built this way,
   one short record per decision (probes, auth, audit, image, state, network,
   secrets, demo access).
