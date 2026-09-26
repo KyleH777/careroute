@@ -50,5 +50,5 @@ variable "db_roles_enabled" {
 variable "legacy_vault_wide_app_access" {
   description = "Keep the pre-ADR-0010 vault-wide Key Vault Secrets User for the API identity. Set false once per-secret access is live (stage C)."
   type        = bool
-  default     = true
+  default     = false
 }
