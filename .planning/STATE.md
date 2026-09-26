@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-09-24)
 ## Current Position
 
 Phase: 1 of 7 (Ops Docs Match Deployment)
-Plan: 0 of 2 in current phase
-Status: Ready to execute
-Last activity: 2026-09-25 - Phase 1 planned (2 plans, 2 waves); docs audited against live Terraform state
+Plan: 2 of 2 in current phase
+Status: Executed; needs human verification (live rehearsal of Azure runbook steps)
+Last activity: 2026-09-25 - Phase 1 executed: AZURE.md rewritten, README/RUNBOOK/INCIDENT-RESPONSE/BACKUP-RESTORE corrected
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
@@ -44,6 +44,8 @@ Recent decisions affecting current work:
 
 - [Roadmap]: R8 docs first, so later phases amend accurate runbooks
 - [Roadmap]: R6 DB roles before R2 CI deploy, so the pipeline automates the final credential/Terraform shape
+- [Phase 1]: Azure restore = PITR to new server; cutover and in-VNet logical dumps are documented gaps
+- [Phase 1]: Deploy/rollback edits `image` in variables.tf (not `-var`) so later applies can't silently roll back
 - [Roadmap]: R3 observability/retention before R4/R5, so login and read-access events have a central home
 
 ### Pending Todos
@@ -70,5 +72,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 1 planned. Next: `/gsd:execute-phase 1` (01-01 opens with a restore-path decision checkpoint)
+Stopped at: Phase 1 executed (see 01-VERIFICATION.md, criterion 2 human_needed). Next: approve/skip live rehearsal, then `/gsd:plan-phase 2`
 Resume file: None

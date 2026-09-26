@@ -17,9 +17,9 @@
 
 ### Operations Docs [R8]
 
-- [ ] **DOCS-01** [R8.1]: `docs/AZURE.md` describes the Terraform deployment as built: centralus, private VNet-injected Postgres with no firewall rules, secrets generated into Key Vault, and migrations/seeding via Container Apps Jobs. The ad-hoc `az` provisioning path and hand-typed secrets are removed
-- [ ] **DOCS-02** [R8.2]: The Azure procedures in `docs/RUNBOOK.md` match the deployment: no firewall-rule check, secret rotation through Terraform/Key Vault, and Azure equivalents for logs, migrations and restores (an in-VNet job instead of laptop access)
-- [ ] **DOCS-03** [R8.3]: The credential rotation steps in `docs/INCIDENT-RESPONSE.md` point at the Key Vault / Terraform path
+- [x] **DOCS-01** [R8.1]: `docs/AZURE.md` describes the Terraform deployment as built: centralus, private VNet-injected Postgres with no firewall rules, secrets generated into Key Vault, and migrations/seeding via Container Apps Jobs. The ad-hoc `az` provisioning path and hand-typed secrets are removed
+- [x] **DOCS-02** [R8.2]: The Azure procedures in `docs/RUNBOOK.md` match the deployment: no firewall-rule check, secret rotation through Terraform/Key Vault, and Azure equivalents for logs, migrations and restores (an in-VNet job instead of laptop access)
+- [x] **DOCS-03** [R8.3]: The credential rotation steps in `docs/INCIDENT-RESPONSE.md` point at the Key Vault / Terraform path
 
 ### Database Roles [R6]
 
@@ -73,9 +73,9 @@ None identified. The PRD lists no deferred-but-planned items. Future candidates 
 | LIVE-02 | Pre-milestone | Complete (2026-09-24) |
 | LIVE-03 | Pre-milestone | Complete (2026-09-24) |
 | LIVE-04 | Pre-milestone | Complete (2026-09-24) |
-| DOCS-01 | Phase 1 | Pending |
-| DOCS-02 | Phase 1 | Pending |
-| DOCS-03 | Phase 1 | Pending |
+| DOCS-01 | Phase 1 | Complete |
+| DOCS-02 | Phase 1 | Complete |
+| DOCS-03 | Phase 1 | Complete |
 | DB-01 | Phase 2 | Pending |
 | DEPLOY-01 | Phase 3 | Pending |
 | DEPLOY-02 | Phase 3 | Pending |
