@@ -1,206 +1,414 @@
-# Azure Database for PostgreSQL — Flexible Server
+# Azure deployment (Terraform)
 
-How to stand up the "prod" database and point CareRoute at it.
+How CareRoute runs on Azure, and how to operate it. `infra/` is the source of
+truth: if this page and the Terraform disagree, the Terraform wins and this page
+has a bug.
 
-> **Nothing here has been provisioned.** These commands create billable cloud
-> resources under your subscription, so running them is your call, not
-> something done on your behalf. Everything below is written to be run as-is,
-> but verify current free-tier terms before you start — Azure changes them, and
-> the eligibility rules in particular are easy to trip over.
+> **What's live.** CareRoute has run on Azure since 2026-09-24, in
+> **centralus**, built entirely by Terraform (27 resources in state). The public
+> API is
+> [careroute-api.yellowglacier-b6e91890.centralus.azurecontainerapps.io](https://careroute-api.yellowglacier-b6e91890.centralus.azurecontainerapps.io/docs).
+> Resource names carry a random suffix, so read them from Terraform rather than
+> copying them from docs:
+>
+> ```bash
+> cd infra && terraform output
+> ```
+>
+> `api_url`, `resource_group`, `key_vault_name`, `postgres_fqdn` and `jobs` are
+> the outputs the commands below rely on.
 
----
-
-## Free tier, accurately
-
-Azure's free offer for PostgreSQL Flexible Server covers, for the first 12
-months of a **new** subscription:
-
-- a **B1ms** burstable instance (1 vCore, 2 GiB RAM), up to 750 hours/month
-- **32 GiB** of storage
-- **32 GiB** of backup storage
-
-Two things routinely surprise people:
-
-1. **750 hours/month is one instance running continuously.** A second server,
-   or a larger SKU, bills normally.
-2. **The 12 months start with the subscription, not the server.** On an
-   existing subscription older than a year, none of this is free.
-
-Storage beyond 32 GiB, high availability, and read replicas are always billed.
-Check the current terms before provisioning:
-https://azure.microsoft.com/pricing/details/postgresql/flexible-server/
+**How the commands on this page were checked:** every `az` and `terraform`
+command was checked against `--help` and `infra/*.tf` on 2026-09-25, but not
+executed against the live deployment, to avoid cost and disruption to the
+public demo. Treat them as reviewed, not rehearsed.
 
 ---
 
-## Provisioning
+## Architecture
 
-Set your variables:
+| Resource | Name | Purpose |
+|---|---|---|
+| Resource group | `careroute-rg` (centralus) | Everything below |
+| Resource group | `careroute-env-infra-rg` (centralus) | Created and managed by Azure for the Container Apps environment's plumbing. Don't edit it by hand |
+| Resource group | `careroute-tfstate-rg` (eastus) | Terraform state storage. Created by `setup-backend.sh`, **not** by Terraform ([ADR-0006](adr/0006-terraform-state-backend.md)) |
+| Virtual network | `careroute-vnet` 10.20.0.0/16 | Private network for the app and the database |
+| Subnet | `snet-apps` 10.20.0.0/23 | Delegated to the Container Apps environment |
+| Subnet | `snet-postgres` 10.20.2.0/24 | Delegated to Postgres Flexible Server |
+| Private DNS zone | `careroute.postgres.database.azure.com` + VNet link | Resolves the database's private hostname inside the VNet |
+| Postgres Flexible Server | `careroute-pg-<suffix>` | Postgres 16, B1ms, 32 GiB, 7-day backups, admin login `careroute_admin` |
+| Database | `careroute` | The application database |
+| Key Vault | `kv-careroute-<suffix>` | Every secret, RBAC mode, 7-day soft delete |
+| Managed identity | `careroute-app-id` | The only identity the app and jobs use to read secrets |
+| Role assignments | Key Vault Secrets Officer (whoever runs Terraform), Key Vault Secrets User (`careroute-app-id`) | Write vs. read access to secrets |
+| Log Analytics workspace | `careroute-logs` | Container logs, 30-day retention, 0.5 GB/day ingestion cap |
+| Container Apps environment | `careroute-env` | Consumption workload profile, VNet-integrated |
+| Container App | `careroute-api` | The API. External ingress on port 8000, 0-2 replicas, liveness `/health`, readiness `/ready` |
+| Container Apps Job | `careroute-migrate` | `alembic upgrade head`, manual trigger |
+| Container Apps Job | `careroute-seed` | `python scripts/seed.py --demo-deployment`, manual trigger |
 
-```bash
-RG=careroute-rg; LOC=eastus; SERVER=careroute-pg-$RANDOM; ADMIN=carerouteadmin
-```
+**Network.** Postgres is VNet-injected into `snet-postgres` with
+`public_network_access_enabled = false`. It has no public endpoint, so there
+are **no firewall rules** to open, audit or get wrong. Only workloads inside
+`careroute-vnet` can reach it, which means no laptop `psql` (see
+[Querying the database from inside the VNet](#querying-the-database-from-inside-the-vnet)).
+TLS is required, and `DATABASE_URL` ends in `?sslmode=require`. Why:
+[ADR-0007](adr/0007-private-postgres-in-centralus.md).
 
-The server name becomes a public DNS label, so it must be globally unique —
-hence the `$RANDOM` suffix.
+**Region.** The app is in **centralus** because this subscription can't create
+Postgres Flexible Server in eastus, eastus2 or westus2. The state storage
+account predates that finding and stays in eastus. It holds only the state
+file, so the cross-region hop doesn't matter.
 
-Log in and create the resource group:
+**Secrets.** Terraform's `random_password` generates every secret and writes it
+to Key Vault. The Container App and both jobs read secrets through
+`careroute-app-id`, using versionless Key Vault references. No human types,
+sees or pastes a production secret. Why:
+[ADR-0008](adr/0008-secrets-generated-into-key-vault.md). The same values are
+also in Terraform state, which is why the state backend is locked down
+([ADR-0006](adr/0006-terraform-state-backend.md)).
+
+---
+
+## First-time deployment
+
+You only need this to build the stack in a new subscription. It's already live
+in the current one.
+
+**1. Bootstrap the state backend** (once per subscription, Azure CLI by
+design; see [ADR-0006](adr/0006-terraform-state-backend.md)):
 
 ```bash
 az login
 ```
 
 ```bash
-az group create --name $RG --location $LOC
+./infra/backend-setup/setup-backend.sh
 ```
 
-Create the server on the free-tier-eligible SKU:
+**2. Initialise Terraform:**
 
 ```bash
-az postgres flexible-server create --resource-group $RG --name $SERVER --location $LOC --admin-user $ADMIN --tier Burstable --sku-name Standard_B1ms --storage-size 32 --version 16 --public-access None --yes
+cd infra
 ```
 
-Notes on those flags:
-
-- `--tier Burstable --sku-name Standard_B1ms --storage-size 32` is the
-  combination the free offer covers. Anything larger bills.
-- `--version 16` matches the `postgres:16-alpine` image used in dev. Keep dev
-  and prod on the same major version — that is precisely where restore drills
-  fail in real life.
-- `--public-access None` starts with the firewall closed. You open it
-  deliberately in the next step.
-- Omitting `--admin-password` makes the CLI prompt for it, which keeps the
-  password out of your shell history. Let it prompt.
-
-Create the application database:
+```bash
+export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+```
 
 ```bash
-az postgres flexible-server db create --resource-group $RG --server-name $SERVER --database-name careroute
+terraform init -backend-config=backend.hcl
+```
+
+**3. Plan, review, apply:**
+
+```bash
+terraform plan -out=careroute.tfplan
+```
+
+```bash
+terraform apply careroute.tfplan
+```
+
+**4. Delete the plan file.** Plan files embed every secret. `*.tfplan` is
+git-ignored, but that only keeps it out of git, not off your disk.
+
+```bash
+rm careroute.tfplan
+```
+
+**5. Migrate, then seed.** Terraform never runs the jobs itself. On a fresh
+database the API is up before any tables exist. `/ready` still returns 200
+(it only checks that the database is reachable), but every data request fails
+until the migration runs ([ADR-0001](adr/0001-one-shot-migration-before-api.md)).
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-migrate
+```
+
+```bash
+az containerapp job execution list -g careroute-rg -n careroute-migrate -o table
+```
+
+Wait for the execution to show `Succeeded`, then seed the read-only demo
+([ADR-0009](adr/0009-read-only-public-demo.md)):
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-seed
 ```
 
 ---
 
-## Network access
+## Deploying a new image
 
-For a quick connection from your current machine:
+Until CI automates this (roadmap Phase 3), deploys are manual, and **the order
+matters**: migrate with the new image first, then roll the app
+([ADR-0001](adr/0001-one-shot-migration-before-api.md)).
+
+**1. Run the new image's migrations**, overriding the job's image for this one
+execution:
 
 ```bash
-az postgres flexible-server firewall-rule create --resource-group $RG --name $SERVER --rule-name my-ip --start-ip-address $(curl -s ifconfig.me) --end-ip-address $(curl -s ifconfig.me)
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<new>
 ```
 
-For anything beyond a trial, prefer private access: put the server on a VNet
-with a private endpoint and drop the public firewall rules entirely. A database
-reachable from the public internet, protected only by a password, is the single
-most common way these get compromised.
+```bash
+az containerapp job execution list -g careroute-rg -n careroute-migrate -o table
+```
 
-Never create the `0.0.0.0 – 255.255.255.255` rule, whatever a tutorial says.
+Stop here if the execution didn't succeed. The API is still on the old image,
+and the migration rolled back (Postgres DDL is transactional). Read the job
+logs ([Logs](#logs)).
+
+**2. Roll the app** to the same tag. Set `default` for `image` in
+`infra/variables.tf` to `ghcr.io/kyleh777/careroute:sha-<new>`, then:
+
+```bash
+terraform apply
+```
+
+Commit the `variables.tf` change. Don't use `-var image=...`: the next apply
+without that flag (a secret rotation, say) would silently roll the app back to
+whatever `variables.tf` says.
+
+> ⚠️ Don't skip step 1. A plain `terraform apply` with a new image updates the
+> migrate job **and** the API in one go, so the API can serve the new code
+> against the old schema before anyone runs the migration.
+
+Always deploy an immutable `sha-` tag. `variables.tf` rejects `:latest`, so
+rollback is the same edit-and-apply with the previous tag (RUNBOOK → Bad deploy).
 
 ---
 
-## Connection string
+## Migrations and seeding
 
-Azure requires TLS. The psycopg driver takes `sslmode` straight from the URL:
+Both jobs run the deployed image with the same environment and secrets as the
+API.
 
-```
-postgresql+psycopg://carerouteadmin:<password>@<server>.postgres.database.azure.com:5432/careroute?sslmode=require
-```
+| | `careroute-migrate` | `careroute-seed` |
+|---|---|---|
+| Command | `alembic upgrade head` | `python scripts/seed.py --demo-deployment` |
+| Trigger | Manual | Manual |
+| Timeout | 600 s | 600 s |
+| Retries | **0**: a failed migration needs a human, not a retry | 0 |
+| Secrets | `database-url`, `jwt-secret` | Those plus both private demo passwords |
 
-`app/config.py` reads this from `DATABASE_URL`, so no code changes are needed —
-the same image runs against Compose in dev and Azure in prod.
-
-**Do not put this in `docker-compose.yml` or any committed file.** Supply it as
-a container App Setting, or better, store it in Key Vault and reference it.
-`pool_pre_ping` is already enabled in `app/db.py`, which matters here: Azure
-drops idle connections, and without pre-ping the first request after an idle
-period fails on a stale connection.
-
-### JWT signing secret
-
-The API also needs `JWT_SECRET` and a non-dev `APP_ENV` (e.g. `production`).
-With any `APP_ENV` other than `local`/`dev`/`test`, the app **refuses to start** if
-`JWT_SECRET` is left at its built-in development default. Generate one and store
-it in Key Vault alongside the connection string:
+To review a migration's SQL before it runs in production, render it against
+the **local** stack. The SQL is the same, and no production credentials are
+involved:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-`scripts/seed.py` also refuses to run outside `local`/`dev`/`test`, because it creates
-demo logins with a published password.
-
----
-
-## Running migrations against Azure
-
-The migrations ship inside the image, so run them with the same image you
-deploy, pointing at the Azure URL:
-
-```bash
-docker run --rm -e DATABASE_URL="postgresql+psycopg://carerouteadmin:<password>@<server>.postgres.database.azure.com:5432/careroute?sslmode=require" careroute:local alembic upgrade head
-```
-
-Preview the SQL before it touches prod:
-
-```bash
-docker run --rm -e DATABASE_URL="postgresql+psycopg://user:pw@host:5432/careroute?sslmode=require" careroute:local alembic upgrade head --sql
-```
-
-`--sql` prints the statements instead of executing them, which is how you get a
-reviewable change script for a production database.
-
-Run migrations as a deliberate step in your deploy pipeline, not from the app's
-startup path. On startup, multiple replicas race each other to migrate the same
-schema.
-
----
-
-## Backups on Azure
-
-Azure takes automated backups with point-in-time restore. Default retention is
-7 days; it is configurable up to 35.
-
-```bash
-az postgres flexible-server update --resource-group $RG --name $SERVER --backup-retention 14
-```
-
-Restore to a point in time — this creates a **new** server rather than
-overwriting the existing one:
-
-```bash
-az postgres flexible-server restore --resource-group $RG --name $SERVER-restored --source-server $SERVER --restore-time "2026-09-16T10:00:00Z"
-```
-
-PITR and the `pg_dump` drill in [BACKUP-RESTORE.md](BACKUP-RESTORE.md) are
-complements, not alternatives. PITR gives you fine-grained recovery but only
-inside Azure and only within the retention window. The logical dumps are
-portable, keepable indefinitely, and restorable to a laptop — which is what you
-want for long-term archives, migrating providers, or a subscription-level
-disaster.
-
-Run the same drill against Azure at least once, so the procedure is proven
-where it actually matters:
-
-```bash
-DB_SERVICE=db ./scripts/backup.sh pre-azure-cutover
+docker compose run --rm migrate alembic upgrade head --sql
 ```
 
 ---
 
-## Cost control
+## Logs
 
-Set a budget alert before you forget the server exists:
-
-```bash
-az consumption budget create --budget-name careroute-monthly --amount 10 --time-grain Monthly --category Cost --resource-group $RG
-```
-
-Burstable servers can be stopped when idle; they auto-start after 7 days.
+API console output, most recent first:
 
 ```bash
-az postgres flexible-server stop --resource-group $RG --name $SERVER
+az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 100
 ```
 
-When the trial is over, delete everything in one move:
+Add `--follow` to stream. Use `--type system` for platform events such as
+image pulls, probe failures, Key Vault reference errors and restarts.
+
+A job's output (defaults to its latest execution):
 
 ```bash
-az group delete --name $RG --yes --no-wait
+az containerapp job logs show -g careroute-rg -n careroute-migrate --container migrate
 ```
+
+Anything older, or anything you need to filter, is in the Log Analytics
+workspace `careroute-logs`, table `ContainerAppConsoleLogs_CL`:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where ContainerAppName_s == "careroute-api"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, RevisionName_s, Log_s
+| order by TimeGenerated desc
+```
+
+Two limits to know during an incident:
+- Retention is **30 days**. Export anything you need as evidence before it
+  ages out.
+- Ingestion is capped at **0.5 GB/day** as a cost guard. Past the cap, logs
+  **stop being collected** until the next day. A noisy failure can therefore
+  hide the logs that come after it.
+
+---
+
+## Querying the database from inside the VNet
+
+A laptop can't reach the database: it has no public endpoint, by design. To
+run a one-off query, start the migrate job with a **command override**. The
+override runs inside the VNet, with the app's `DATABASE_URL`. The image has
+Python, SQLAlchemy and psycopg, but no shell and no `psql`.
+
+Example: look up one account (read-only):
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --command python --args -c "import os, sqlalchemy as sa; e = sa.create_engine(os.environ['DATABASE_URL']); print(e.connect().execute(sa.text(\"select email, role, is_active from users where email = 'someone@example.com'\")).all())"
+```
+
+Then read the output:
+
+```bash
+az containerapp job logs show -g careroute-rg -n careroute-migrate --container migrate
+```
+
+Status: syntax-checked against `az containerapp job start --help`, not yet
+executed.
+
+Know what you're doing when you use this:
+- It connects as the **server admin** (the app has no least-privilege role
+  yet; roadmap Phase 2). A typo in a write statement hits live data. Take a
+  timestamp for point-in-time restore first.
+- The command text is kept in the job's execution history and printed to the
+  logs. **Never put a secret in it.** Never print `DATABASE_URL`.
+- Anyone who can start a job can override its command and read the job's
+  secrets. Treat "can start `careroute-migrate`" as "can read the database
+  password".
+- Each execution bills a few seconds of consumption compute.
+
+---
+
+## Secrets and rotation
+
+| Key Vault secret | Env var | Read by | Generated by |
+|---|---|---|---|
+| `database-url` | `DATABASE_URL` | API, migrate, seed | `random_password.postgres_admin` + server FQDN |
+| `jwt-secret` | `JWT_SECRET` | API, migrate, seed | `random_password.jwt_secret` |
+| `demo-clinician-password` | `DEMO_CLINICIAN_PASSWORD` | seed | `random_password.demo_clinician` |
+| `demo-coordinator-password` | `DEMO_COORDINATOR_PASSWORD` | seed | `random_password.demo_coordinator` |
+
+With `APP_ENV=production`, the API refuses to start if `JWT_SECRET` is still
+the built-in development default. That makes a missing Key Vault reference
+fail loudly instead of silently.
+
+**To rotate a secret**, replace its generator. Terraform writes a new version
+to Key Vault:
+
+```bash
+terraform apply -replace=random_password.jwt_secret
+```
+
+The app references secrets **without a version**, so no other Terraform change
+is needed. Per Microsoft's documentation, Container Apps retrieves the new
+version **within 30 minutes** and restarts active revisions that use it. Don't
+wait on that during an incident. Restart the running revision now:
+
+```bash
+az containerapp revision list -g careroute-rg -n careroute-api --query "[?properties.active].name" -o tsv
+```
+
+```bash
+az containerapp revision restart -g careroute-rg -n careroute-api --revision <revision-name>
+```
+
+Jobs read secrets fresh on every execution, so they need nothing extra.
+
+What each rotation does:
+
+| Rotate | Resource | Effect |
+|---|---|---|
+| JWT signing key | `random_password.jwt_secret` | Every issued token fails at once. Everyone logs in again. This is the "log everyone out" lever |
+| Database password | `random_password.postgres_admin` | One apply changes the server's admin password **and** the `database-url` secret. Until the API restarts, it holds the old password: `/ready` returns 503 and requests fail. Restart straight away, off-hours if you can |
+| Demo passwords | `random_password.demo_clinician` / `demo_coordinator` | New values in Key Vault. Run `careroute-seed` again to apply them to the accounts |
+
+If Terraform **state**, or a `*.tfplan` file, may have leaked, treat all four
+secrets as exposed and rotate them all. Both contain every value.
+
+Break-glass read of a secret (needs Key Vault Secrets Officer; prints the
+value to your terminal, so be deliberate):
+
+```bash
+az keyvault secret show --vault-name $(terraform output -raw key_vault_name) --name jwt-secret --query value -o tsv
+```
+
+---
+
+## Backups and restore
+
+Azure backs up the server automatically, with point-in-time restore (PITR).
+Retention is **7 days**, set by `backup_retention_days` in
+`infra/database.tf`. Change it there, not with `az ... update`, or Terraform
+will revert it on the next apply.
+
+**Restore to a new server.** PITR always creates a **new** server and never
+overwrites the live one. Put it on the same private network:
+
+```bash
+az postgres flexible-server restore -g careroute-rg --name careroute-pg-restore --source-server <postgres-server-name> --restore-time "2026-09-16T10:00:00Z" --subnet <snet-postgres-resource-id> --private-dns-zone <private-dns-zone-resource-id>
+```
+
+The server name is the first label of `terraform output -raw postgres_fqdn`.
+Get the subnet and zone IDs with `az network vnet subnet show` and
+`az network private-dns zone show`.
+
+**Inspect it** with the in-VNet query above, pointed at the restored host:
+build the URL inside the `python -c` from `DATABASE_URL`, swapping only the
+hostname. The admin password is whatever the source server had at the
+restore time.
+
+**Known gaps** (open work, not yet solved):
+- **Cutover isn't scripted.** The restored server isn't in Terraform state,
+  and `database-url` is built from the Terraform-managed server. Promoting the
+  restore means changing Terraform (import the new server, or re-point the
+  secret), and that hasn't been designed or rehearsed. In practice, PITR here
+  is for recovering and inspecting data, not for a full swap.
+- **No logical dump/restore in Azure.** `scripts/backup.sh` and
+  `scripts/restore.sh` target the local Compose stack
+  ([BACKUP-RESTORE.md](BACKUP-RESTORE.md)). The hardened app image has no
+  `pg_dump`/`pg_restore`, and no in-VNet job runs them, so there is no way to
+  take a portable dump of the Azure database yet.
+- **Delete restored servers when done.** Each one bills as a second B1ms.
+
+---
+
+## Cost
+
+The target is under ~$20/month.
+
+| What bills | Notes |
+|---|---|
+| Postgres B1ms + 32 GiB storage | Covered by Azure's free offer only for the first 12 months of a **new** subscription (750 hours/month = one server running continuously). Check the [current terms](https://azure.microsoft.com/pricing/details/postgresql/flexible-server/). Restored servers bill on top |
+| Container Apps (consumption) | `min_replicas = 0`: scales to zero when idle, so the first request after a quiet period takes a few seconds. Job executions bill for their run time |
+| Log Analytics | Hard cap of 0.5 GB/day |
+| Key Vault | Per-operation, negligible at this volume |
+| State storage | A few KB, pennies |
+
+**No budget alert is provisioned.** Terraform doesn't create one. If you want
+one, add it deliberately (manually, or as a Terraform resource). Don't assume
+it exists.
+
+Stopping Postgres saves compute but takes the API down: `/ready` returns 503
+until it starts again, and Azure restarts a stopped server automatically after
+7 days.
+
+```bash
+az postgres flexible-server stop -g careroute-rg -n <postgres-server-name>
+```
+
+---
+
+## Teardown
+
+Everything goes through Terraform:
+
+```bash
+cd infra && terraform destroy
+```
+
+- The Key Vault is **soft-deleted** for 7 days, not purged
+  (`purge_soft_delete_on_destroy = false`), so an accidental destroy is
+  recoverable. Redeploying with the same vault name inside that window needs
+  the vault purged or recovered first.
+- The state backend (`careroute-tfstate-rg`) is untouched and carries a
+  delete lock ([ADR-0006](adr/0006-terraform-state-backend.md)). Remove it only
+  deliberately.
+
+Don't `az group delete careroute-rg`. It deletes the resources behind
+Terraform's back and leaves state describing things that no longer exist.
