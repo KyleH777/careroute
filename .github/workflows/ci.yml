@@ -16,13 +16,27 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual deploys from main: redeploy an existing tag (rollback when the
+  # schema didn't change), or run the failing-migration drill (DEPLOY-03).
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "sha- tag to deploy (default: this commit's)"
+        required: false
+        default: ""
+      simulate_migration_failure:
+        description: "Drill: make the migration step fail on purpose"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# Superseded PR runs are cancelled; runs on main never are, so a deploy is
+# never interrupted mid-apply (the deploy job also serializes on its own).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   TRIVY_VERSION: "0.74.0"
@@ -70,11 +84,16 @@ jobs:
     name: Build, scan & publish image
     needs: [lint, test]
     runs-on: ubuntu-latest
+    outputs:
+      # Matches metadata-action's type=sha tag.
+      tag: sha-${{ steps.short.outputs.sha }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v5
+      - id: short
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       # QEMU lets the amd64 runner also build the arm64 image (Apple Silicon,
       # Graviton). Only the publish step uses it; the scan runs on amd64.
       - uses: docker/setup-qemu-action@v3
@@ -136,3 +155,73 @@ jobs:
           # SBOM lists every package for anyone auditing the published image.
           provenance: mode=max
           sbom: true
+
+  # Ordered deploy (ADR-0001, ADR-0011): move only the migrate job to the new
+  # image, run the migration and require exit 0, then move the app. A failed
+  # migration stops here with the previous revision still serving.
+  deploy:
+    name: Deploy to Azure
+    needs: image
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    # The OIDC subject is this environment, which only main may use; PR and
+    # fork runs can't obtain the identity.
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_operator_object_id: ${{ secrets.TF_VAR_OPERATOR_OBJECT_ID }}
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      IMAGE_REPO: ghcr.io/kyleh777/careroute
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Azure login (OIDC, no stored credential)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: infra
+        run: terraform init -input=false -no-color -backend-config=backend.hcl
+
+      - name: Resolve images
+        id: img
+        working-directory: infra
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          BUILT_TAG: ${{ needs.image.outputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-$BUILT_TAG}"
+          [[ "$tag" =~ ^sha-[0-9a-f]{7,40}$ ]] || { echo "::error::bad tag '$tag'"; exit 1; }
+          echo "new=$IMAGE_REPO:$tag" >> "$GITHUB_OUTPUT"
+          echo "current_app=$(terraform output -raw app_image)" >> "$GITHUB_OUTPUT"
+          echo "deploying $IMAGE_REPO:$tag (app currently $(terraform output -raw app_image))"
+
+      - name: "Stage 1: point the migrate job at the new image"
+        run: .github/scripts/deploy.sh apply "${{ steps.img.outputs.current_app }}" "${{ steps.img.outputs.new }}"
+
+      - name: "Migrate: run and require exit 0"
+        run: .github/scripts/deploy.sh migrate ${{ inputs.simulate_migration_failure && '--simulate-failure' || '' }}
+
+      - name: "Stage 2: roll the app to the new image"
+        run: .github/scripts/deploy.sh apply "${{ steps.img.outputs.new }}" "${{ steps.img.outputs.new }}"
+
+      - name: Smoke check
+        run: .github/scripts/deploy.sh smoke "${{ steps.img.outputs.new }}"
