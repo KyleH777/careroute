@@ -16,7 +16,7 @@ resource "azurerm_log_analytics_workspace" "main" {
   location            = azurerm_resource_group.app.location
   resource_group_name = azurerm_resource_group.app.name
   sku                 = "PerGB2018"
-  retention_in_days   = 30
+  retention_in_days   = 90  # incident look-back (ADR-0012); first 31 days are included
   daily_quota_gb      = 0.5 # hard cost cap: ingestion stops past 0.5 GB/day
   tags                = local.tags
 }
@@ -108,7 +108,9 @@ resource "azurerm_container_app" "api" {
       memory = "1Gi"
 
       dynamic "env" {
-        for_each = local.app_env_plain
+        # METRICS_PORT: Prometheus on its own listener. Ingress maps only 8000,
+        # so metrics are never reachable from the public URL (ADR-0012).
+        for_each = merge(local.app_env_plain, { METRICS_PORT = "9000" })
         content {
           name  = env.key
           value = env.value

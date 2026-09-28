@@ -93,3 +93,16 @@ variable "legacy_vault_wide_app_access" {
   type        = bool
   default     = false
 }
+
+# Where Azure Monitor alerts go. Supplied via TF_VAR_alert_email (locally and
+# as a GitHub environment secret), so the address isn't in the public repo.
+variable "alert_email" {
+  description = "Owner email for Azure Monitor alerts."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    error_message = "alert_email must be an email address."
+  }
+}
