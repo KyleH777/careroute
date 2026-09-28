@@ -27,9 +27,9 @@
 
 ### Deploy Automation [R2]
 
-- [ ] **DEPLOY-01** [R2.1]: On `main`, after the image is published, CI runs `terraform plan`/`apply` with the new `sha-` tag, runs the migrate job and waits for success, then rolls the Container App. The order is enforced (ADR-0001)
-- [ ] **DEPLOY-02** [R2.2]: CI authenticates to Azure with OIDC workload identity federation. No Azure credentials are stored, and access is scoped to the CareRoute resource groups
-- [ ] **DEPLOY-03** [R2.3]: A failed migration stops the deploy and leaves the previous revision serving
+- [x] **DEPLOY-01** [R2.1]: On `main`, after the image is published, CI runs `terraform plan`/`apply` with the new `sha-` tag, runs the migrate job and waits for success, then rolls the Container App. The order is enforced (ADR-0001)
+- [x] **DEPLOY-02** [R2.2]: CI authenticates to Azure with OIDC workload identity federation. No Azure credentials are stored, and access is scoped to the CareRoute resource groups
+- [x] **DEPLOY-03** [R2.3]: A failed migration stops the deploy and leaves the previous revision serving
 
 ### Observability [R3]
 
@@ -77,9 +77,9 @@ None identified. The PRD lists no deferred-but-planned items. Future candidates 
 | DOCS-02 | Phase 1 | Complete |
 | DOCS-03 | Phase 1 | Complete |
 | DB-01 | Phase 2 | Complete |
-| DEPLOY-01 | Phase 3 | Pending |
-| DEPLOY-02 | Phase 3 | Pending |
-| DEPLOY-03 | Phase 3 | Pending |
+| DEPLOY-01 | Phase 3 | Complete |
+| DEPLOY-02 | Phase 3 | Complete |
+| DEPLOY-03 | Phase 3 | Complete |
 | OBS-01 | Phase 4 | Pending |
 | OBS-02 | Phase 4 | Pending |
 | OBS-03 | Phase 4 | Pending |

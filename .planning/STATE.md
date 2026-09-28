@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-09-24)
 
 **Core value:** On every push to `main`, CI deploys the live demo automatically, in ADR-0001 order. When an incident happens, it can be detected, scoped and contained using docs that match the deployed system, all under ~$20/month.
-**Current focus:** Phase 3 - Automated Ordered Deploys
+**Current focus:** Phase 4 - Observability & Central Log Retention
 
 ## Current Position
 
-Phase: 3 of 7 (Automated Ordered Deploys)
-Plan: 1 of 3 complete; 03-02 paused after first deploy attempt
-Status: Paused (user request)
-Last activity: 2026-09-26 - First automated deploy (run 36261898752) failed at OIDC login; Azure untouched
+Phase: 4 of 7 (Observability & Central Log Retention)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-09-28 - Phase 3 complete: automated two-stage OIDC deploys live, drill passed, ADR-0011
 
-Progress: [███░░░░░░░] 29%
+Progress: [████░░░░░░] 43%
 
 ## Performance Metrics
 
@@ -58,8 +58,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 3] Hazard: a single `terraform apply` that updates both the migrate-job image and the app image would roll the app before migration (violates ADR-0001). The pipeline must stage this.
-- [Phase 3] Hazard: the CI OIDC identity can read all secrets via state. Needs a narrow federated subject, no tfplan artifacts, no plan output in logs.
 - [Phase 4] Alerting vs scale-to-zero: an external availability probe on `/ready` wakes the app and may keep a replica warm (cost). Research alert signal options (metric/log alerts vs availability tests) against the ~$20/month budget. The existing workspace has a 0.5 GB/day cap and 30-day retention.
 - [Phase 5] The rate limiter must see the real client IP behind Container Apps ingress and share state across replicas without a paid cache (Postgres-backed is a candidate).
 - [General] `.planning/` is public. Never paste secrets, Key Vault values or plan output into planning artifacts.
@@ -75,6 +73,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: 03-02 Task 4. Pushed c3bb05b; CI lint/test/image green (image sha-c3bb05b published); deploy failed at `azure/login`: AADSTS700213. Cause: the repo's OIDC subject uses GitHub's immutable-ID format `repo:KyleH777@88053223/careroute@1383757448:environment:production`, but infra/ci's federated credential expects `repo:KyleH777/careroute:environment:production`. No Terraform/job ran; the API is still on sha-da96d74.
-Resume: (1) change infra/ci subject to the ID form (make var github_repo -> github_subject_repo = "KyleH777@88053223/careroute@1383757448"), human-apply infra/ci (1 in-place/replace of the federated credential); (2) re-run the deploy: `gh run rerun 36261898752 --failed -R KyleH777/careroute`; (3) evidence for criteria 1/2/4; (4) drill checkpoint; (5) 03-03 docs (note the subject format in ADR-0011/RUNBOOK "CI is red": AADSTS700213 = subject mismatch).
+Stopped at: Phase 3 complete. Next: `/gsd:plan-phase 4`. Note: every push to main now deploys (one job run + one revision each).
 Resume file: None
