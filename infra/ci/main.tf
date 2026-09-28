@@ -16,6 +16,7 @@
 #     assign/remove only Key Vault Secrets User/Officer (all the main config
 #     assigns), so it can't grant itself Owner
 #   - Storage Blob Data Contributor on the tfstate container only
+#   - Reader on its own identity (so the main config can look it up)
 # Accepted in ADR-0011: this means CI can read every secret.
 
 terraform {
@@ -85,7 +86,7 @@ resource "azurerm_federated_identity_credential" "github_production" {
   user_assigned_identity_id = azurerm_user_assigned_identity.ci.id
   issuer                    = "https://token.actions.githubusercontent.com"
   audience                  = ["api://AzureADTokenExchange"]
-  subject                   = "repo:${var.github_repo}:environment:production"
+  subject                   = "repo:${var.github_subject_repo}:environment:production"
 }
 
 resource "azurerm_role_assignment" "contributor" {
@@ -107,5 +108,15 @@ resource "azurerm_role_assignment" "rbac_admin_constrained" {
 resource "azurerm_role_assignment" "state_container" {
   scope                = local.tfstate_container_id
   role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.ci.principal_id
+}
+
+# The main config looks this identity up (to grant it Key Vault Secrets
+# Officer), so CI must be able to read it. Reader on this one resource only:
+# it can't write federated credentials, so CI still can't change how it
+# signs in.
+resource "azurerm_role_assignment" "self_read" {
+  scope                = azurerm_user_assigned_identity.ci.id
+  role_definition_name = "Reader"
   principal_id         = azurerm_user_assigned_identity.ci.principal_id
 }

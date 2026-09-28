@@ -100,10 +100,20 @@ smoke() {
   live_migrate=$(az containerapp job show -g "$RG" -n "$MIGRATE_JOB" \
     --query 'properties.template.containers[0].image' -o tsv)
   echo "/ready 200; api image $live_app; migrate image $live_migrate"
-  echo "active revision: $(az containerapp revision list -g "$RG" -n careroute-api \
-    --query '[?properties.active].name' -o tsv)"
   [[ $live_app == "$want" && $live_migrate == "$want" ]] \
     || { echo "::error::live images don't match $want"; return 1; }
+
+  # Single revision mode keeps the old revision active until the new one is
+  # ready, so wait for the switch rather than reading it mid-flight.
+  local active=""
+  for i in $(seq 1 18); do
+    active=$(az containerapp revision list -g "$RG" -n careroute-api \
+      --query "[?properties.active && properties.template.containers[0].image=='$want'].name" -o tsv)
+    [[ -n $active ]] && break
+    sleep 10
+  done
+  [[ -n $active ]] || { echo "::error::no active revision runs $want"; return 1; }
+  echo "active revision: $active ($want)"
 }
 
 case "${1:-}" in
