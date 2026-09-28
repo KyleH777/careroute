@@ -6,7 +6,7 @@ containerized, and the focus was production practices: authentication with
 role-based access, a tamper-resistant audit trail, versioned database
 migrations, a verified backup-and-restore drill, a hardened container image,
 and a CI pipeline that lints, tests, security-scans and publishes the image
-on every push.
+on every push, then deploys it to Azure (migration first, then the app).
 
 # CareRoute — Containerized
 
@@ -18,7 +18,9 @@ when idle, so the first request can take a few seconds.
 
 FastAPI + Postgres 16, with JWT authentication and role-based access control,
 Alembic migrations, a deterministic seed dataset, a tested backup/restore
-drill, and a CI pipeline that lints, tests, scans and publishes the image.
+drill, and a CI pipeline that lints, tests, scans and publishes the image,
+then deploys it to Azure in migrate-then-app order over OIDC
+([ADR-0011](docs/adr/0011-ci-deploys-via-terraform.md)).
 
 Multi-stage Docker build on [Docker Hardened Images](https://dhi.io). The
 build stage (`dhi.io/python:3.12-debian13-dev`) installs dependencies into a

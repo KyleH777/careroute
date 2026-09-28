@@ -48,6 +48,8 @@ reviewed, not rehearsed.
 | Container App | `careroute-api` | The API. External ingress on port 8000, 0-2 replicas, liveness `/health`, readiness `/ready` |
 | Container Apps Job | `careroute-migrate` | `alembic upgrade head`, manual trigger |
 | Container Apps Job | `careroute-seed` | `python scripts/seed.py --demo-deployment`, manual trigger |
+| Resource group | `careroute-ci-rg` (centralus) | Holds only the CI deploy identity. Applied by a human from `infra/ci/`; CI has no role here ([ADR-0011](adr/0011-ci-deploys-via-terraform.md)) |
+| Managed identity | `careroute-ci-id` | What GitHub Actions deploys as (OIDC, `production` environment only) |
 | Container Apps Job | `careroute-db-bootstrap` | `python scripts/db_roles.py` as the server admin: creates and maintains the database roles, manual trigger |
 
 **Network.** Postgres is VNet-injected into `snet-postgres` with
@@ -99,36 +101,37 @@ az login
 ./infra/backend-setup/setup-backend.sh
 ```
 
-**2. Initialise Terraform:**
-
-```bash
-cd infra
-```
+**2. Create the CI deploy identity** (its own root, applied only by a
+human, [ADR-0011](adr/0011-ci-deploys-via-terraform.md)). The main config
+refers to it, so it comes first:
 
 ```bash
 export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 ```
 
 ```bash
-terraform init -backend-config=backend.hcl
+cd infra/ci && terraform init -backend-config=../backend.hcl && terraform apply
 ```
 
-**3. Plan, review, apply:**
+**3. Apply the main config.** The image variables are required: name the
+`sha-` tag to start with. `TF_VAR_operator_object_id` is you, the human who
+keeps Key Vault Secrets Officer:
 
 ```bash
-terraform plan -out=careroute.tfplan
+cd infra && terraform init -backend-config=backend.hcl
 ```
 
 ```bash
-terraform apply careroute.tfplan
+export TF_VAR_operator_object_id=$(az ad signed-in-user show --query id -o tsv)
 ```
-
-**4. Delete the plan file.** Plan files embed every secret. `*.tfplan` is
-git-ignored, but that only keeps it out of git, not off your disk.
 
 ```bash
-rm careroute.tfplan
+terraform apply -var app_image=ghcr.io/kyleh777/careroute:sha-<tag> -var migrate_image=ghcr.io/kyleh777/careroute:sha-<tag>
 ```
+
+**4. Don't write plan files.** They embed every secret. `*.tfplan` is
+git-ignored, but that only keeps it out of git, not off your disk. Review the
+plan `terraform apply` shows before you confirm.
 
 **5. Create the database roles, then migrate, then seed.** Terraform never runs
 the jobs itself. First the roles:
@@ -160,12 +163,73 @@ az containerapp job start -g careroute-rg -n careroute-seed
 
 ## Deploying a new image
 
-Until CI automates this (roadmap Phase 3), deploys are manual, and **the order
-matters**: migrate with the new image first, then roll the app
-([ADR-0001](adr/0001-one-shot-migration-before-api.md)).
+**CI does this on every push to `main`** ([ADR-0011](adr/0011-ci-deploys-via-terraform.md)).
+After lint, tests and the image publish pass, the `deploy` job in
+`.github/workflows/ci.yml` signs in to Azure over OIDC (no stored credential)
+as `careroute-ci-id` and runs `.github/scripts/deploy.sh` in
+[ADR-0001](adr/0001-one-shot-migration-before-api.md) order:
 
-**1. Run the new image's migrations**, overriding the job's image for this one
-execution. An override **replaces the job's whole container definition**, so
+1. **Stage 1:** `terraform apply` with `migrate_image` = the new tag and
+   `app_image` = the live one. Only the migrate job changes.
+2. **Migrate:** start `careroute-migrate` and wait. Anything but `Succeeded`
+   fails the run here. The app was never touched, so the previous revision
+   keeps serving.
+3. **Stage 2:** `terraform apply` with both images = the new tag. The API,
+   seed and db-bootstrap move. Single revision mode keeps the old revision
+   serving until the new one passes readiness.
+4. **Smoke:** `/ready` 200, both images are the new tag, and the active
+   revision runs it.
+
+Deploys run one at a time (`deploy-production` concurrency), and a newer push
+never cancels a running one. Watch them in the Actions tab, or:
+
+```bash
+gh run list -R KyleH777/careroute --workflow CI --limit 5
+```
+
+**Redeploy an existing tag** (rollback when the schema didn't change; see
+RUNBOOK → Bad deploy):
+
+```bash
+gh workflow run ci.yml --ref main -R KyleH777/careroute -f image_tag=sha-<good>
+```
+
+**Drill** (proves a failed migration stops the deploy; last run 2026-09-28,
+run 36374139943):
+
+```bash
+gh workflow run ci.yml --ref main -R KyleH777/careroute -f simulate_migration_failure=true
+```
+
+### Running Terraform by hand
+
+For infra changes, rotations and teardown. The image variables have no
+default, so every apply must say which images to keep. Take them from the live
+state, so a manual apply never moves images:
+
+```bash
+cd infra && export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv) TF_VAR_operator_object_id=$(az ad signed-in-user show --query id -o tsv)
+```
+
+```bash
+TF_IMAGES=(-var "app_image=$(terraform output -raw app_image)" -var "migrate_image=$(terraform output -raw migrate_image)")
+```
+
+```bash
+terraform apply "${TF_IMAGES[@]}"
+```
+
+Don't apply while a CI deploy is running: its state lock will stop you, and
+stale `TF_IMAGES` would undo its stage 2. Commit any infra change to `main`
+too, or the next CI deploy will revert it.
+
+**A manual deploy** (CI unavailable) is the same order by hand: stage 1 with
+`-var migrate_image=<new>` and the live `app_image`, run the migrate job and
+check it `Succeeded`, then stage 2 with both set to `<new>`.
+
+### Job environments
+
+A job **command override** replaces the job's whole container definition, so
 the command and environment must be passed again. Without them the job starts
 the image's default command, which is the API server, with no database URL.
 An override can only reference secrets that are defined on that job. Set the
@@ -181,36 +245,6 @@ READ_ENV=(APP_ENV=production PYTHONUNBUFFERED=1 DATABASE_URL=secretref:database-
 
 `MIGRATE_ENV` is for the migrate job (schema owner). `READ_ENV` is for the
 seed job (DML-only app role), which is the one to use for queries.
-
-```bash
-az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<new> --env-vars "${MIGRATE_ENV[@]}" --command alembic --args upgrade head
-```
-
-```bash
-az containerapp job execution list -g careroute-rg -n careroute-migrate -o table
-```
-
-Stop here if the execution didn't succeed. The API is still on the old image,
-and the migration rolled back (Postgres DDL is transactional). Read the job
-logs ([Logs](#logs)).
-
-**2. Roll the app** to the same tag. Set `default` for `image` in
-`infra/variables.tf` to `ghcr.io/kyleh777/careroute:sha-<new>`, then:
-
-```bash
-terraform apply
-```
-
-Commit the `variables.tf` change. Don't use `-var image=...`: the next apply
-without that flag (a secret rotation, say) would silently roll the app back to
-whatever `variables.tf` says.
-
-> ⚠️ Don't skip step 1. A plain `terraform apply` with a new image updates the
-> migrate job **and** the API in one go, so the API can serve the new code
-> against the old schema before anyone runs the migration.
-
-Always deploy an immutable `sha-` tag. `variables.tf` rejects `:latest`, so
-rollback is the same edit-and-apply with the previous tag (RUNBOOK → Bad deploy).
 
 ---
 
@@ -304,7 +338,7 @@ Use the least-privileged row that works.
 Three rules, all learned by running it:
 - An override replaces the whole container, so pass `--image` and the
   environment (`READ_ENV`/`MIGRATE_ENV`, from
-  [Deploying a new image](#deploying-a-new-image)) every time. Without them it
+  [Job environments](#job-environments)) every time. Without them it
   fails with `Image property` or `KeyError: 'DATABASE_URL'`.
 - Attach Python's `-c` to the code, as in `"-cimport ..."`. A bare `-c` is
   parsed by `az` as its own flag and rejected. Keep the code on **one line**:
@@ -377,8 +411,10 @@ fail loudly instead of silently.
 to Key Vault:
 
 ```bash
-terraform apply -replace=random_password.jwt_secret
+terraform apply "${TF_IMAGES[@]}" -replace=random_password.jwt_secret
 ```
+
+(`TF_IMAGES`: see [Running Terraform by hand](#running-terraform-by-hand).)
 
 The app references secrets **without a version**, so no other Terraform change
 is needed. Per Microsoft's documentation, Container Apps retrieves the new
@@ -409,6 +445,8 @@ If Terraform **state**, or a `*.tfplan` file, may have leaked, treat every
 secret as exposed and rotate them all: `postgres_admin`, `pg_migrate`,
 `pg_app`, `jwt_secret` and both demo passwords. Both contain every value. One
 apply with a `-replace` for each, then db-bootstrap, then restart the API.
+If the leak came through CI, cut CI off first (RUNBOOK → Who can read
+production secrets).
 
 Break-glass read of a secret (needs Key Vault Secrets Officer; prints the
 value to your terminal, so be deliberate):
@@ -488,7 +526,13 @@ az postgres flexible-server stop -g careroute-rg -n <postgres-server-name>
 Everything goes through Terraform:
 
 ```bash
-cd infra && terraform destroy
+cd infra && terraform destroy "${TF_IMAGES[@]}"
+```
+
+Then the CI identity, if you're removing everything:
+
+```bash
+cd infra/ci && terraform destroy
 ```
 
 - The Key Vault is **soft-deleted** for 7 days, not purged

@@ -66,10 +66,10 @@ Restore service first; root cause comes later. From the runbook:
 
 | Situation | Fastest mitigation |
 |---|---|
-| Bad deploy | Roll back to the previous `sha-` image (RUNBOOK → Bad deploy). Azure: set `image` in `infra/variables.tf`, then `terraform apply` |
+| Bad deploy | Roll back to the previous `sha-` image (RUNBOOK → Bad deploy). Azure: `gh workflow run ci.yml --ref main -f image_tag=sha-<good>` |
 | Database down | Restart it; the api reconnects automatically (RUNBOOK → Database unreachable). Azure: `az postgres flexible-server start` or `restart` |
 | Compromised account | Set `is_active = false`: effective on its **next request** (RUNBOOK → Lock out a user) |
-| Leaked `JWT_SECRET` | Rotate it: invalidates **all** tokens at once (RUNBOOK → Invalidate everyone's tokens). Azure: `terraform apply -replace=random_password.jwt_secret`, then restart the revision |
+| Leaked `JWT_SECRET` | Rotate it: invalidates **all** tokens at once (RUNBOOK → Invalidate everyone's tokens). Azure: `terraform apply "${TF_IMAGES[@]}" -replace=random_password.jwt_secret`, then restart the revision |
 | Bad data change | **Snapshot first**, then restore or point-in-time restore (RUNBOOK → Data loss). Azure: note the UTC time, then PITR to a *new* server |
 
 ### 3. Preserve evidence
@@ -132,13 +132,13 @@ accessed, changed or leaked by someone unauthorized.
 
 - **Specific accounts:** deactivate them (`is_active = false`).
 - **Token or signing key exposure:** rotate `JWT_SECRET`. Azure:
-  `terraform apply -replace=random_password.jwt_secret`, which writes a new
+  `terraform apply "${TF_IMAGES[@]}" -replace=random_password.jwt_secret`, which writes a new
   version of Key Vault secret `jwt-secret`. Then
   `az containerapp revision restart` on the active `careroute-api` revision so
   it takes effect now rather than within 30 minutes. Expect every session to
   get 401.
 - **Database credentials exposed:** find out which role's. Azure: rotate with
-  `terraform apply -replace=random_password.<pg_app | pg_migrate | postgres_admin>`,
+  `terraform apply "${TF_IMAGES[@]}" -replace=random_password.<pg_app | pg_migrate | postgres_admin>`,
   then **immediately** run `careroute-db-bootstrap`, which sets the new password
   in Postgres. For the app role, also restart the active `careroute-api`
   revision. Until bootstrap runs, Key Vault and the database disagree and the
@@ -148,6 +148,10 @@ accessed, changed or leaked by someone unauthorized.
   edits a connection string by hand. Compose (dev): the passwords are dev-only
   literals in `docker-compose.yml`; change them there and
   `docker compose up -d`.
+- **Compromised `main` branch, workflow or CI identity:** deleting the
+  federated credential stops all deploys (RUNBOOK → Who can read production
+  secrets → Cut CI off). Treat every secret as exposed: CI can read them all
+  (ADR-0011).
 - **Terraform state or a `*.tfplan` file exposed:** both contain **every**
   secret. Rotate every `random_password` resource (the three database roles,
   the JWT key and both demo passwords), run db-bootstrap, restart the API, and review who holds

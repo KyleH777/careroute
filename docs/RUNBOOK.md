@@ -198,7 +198,7 @@ Rotate the secret. Every existing token instantly fails signature checks.
 **Azure:** Terraform generates the new secret. Nobody types or sees it:
 
 ```bash
-cd infra && terraform apply -replace=random_password.jwt_secret
+cd infra && terraform apply "${TF_IMAGES[@]}" -replace=random_password.jwt_secret   # TF_IMAGES: AZURE.md → Running Terraform by hand
 ```
 
 ```bash
@@ -284,9 +284,16 @@ docker pull ghcr.io/kyleh777/careroute:sha-<good-sha>
 git checkout <good-sha> && docker compose up --build -d
 ```
 
-Azure: set `image` in `infra/variables.tf` back to
-`ghcr.io/kyleh777/careroute:sha-<good-sha>`, then `terraform apply`, and commit
-the change ([AZURE.md → Deploying a new image](AZURE.md#deploying-a-new-image)).
+Azure: redeploy the good tag through CI. It runs the same ordered deploy
+(the migrate step is a no-op, since the schema is unchanged):
+
+```bash
+gh workflow run ci.yml --ref main -R KyleH777/careroute -f image_tag=sha-<good-sha>
+```
+
+The next push to `main` deploys that commit as usual, so fix forward (or
+revert the bad commit) before merging anything else
+([AZURE.md → Deploying a new image](AZURE.md#deploying-a-new-image)).
 
 **2b. A migration changed:** roll the **schema** back first, using the **new**
 image (only it contains the downgrade code), then deploy the old image.
@@ -297,11 +304,14 @@ docker compose run --rm migrate alembic current                   # where are we
 docker compose run --rm migrate alembic downgrade <good-revision>  # e.g. 0f4937d2a980
 ```
 
-Azure (`MIGRATE_ENV` is defined in [AZURE.md → Deploying a new image](AZURE.md#deploying-a-new-image);
+Azure (`MIGRATE_ENV` is defined in [AZURE.md → Job environments](AZURE.md#job-environments);
 an override without it runs with no database URL): there is no `backup.sh`. Instead, **write down the current UTC time**
 as your point-in-time-restore target. Then run the downgrade with the **bad**
-(newer) image through the migrate job, and only after it succeeds roll the image
-back as in 2a:
+(newer) image through the migrate job, and only after it succeeds redeploy the
+good tag through CI as in 2a. The deploy's migrate step then finds the schema
+already at the good revision. If you skip the downgrade, that step fails with
+`Can't locate revision` and the deploy stops before touching the app, which
+is safe but not a rollback:
 
 ```bash
 az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image ghcr.io/kyleh777/careroute:sha-<bad-sha> --env-vars "${MIGRATE_ENV[@]}" --command alembic --args downgrade <good-revision>
@@ -372,9 +382,41 @@ object storage.
 | Tests & migrations → dhi.io login | `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets missing or token expired | Regenerate the Docker Hub token, `gh secret set DOCKERHUB_TOKEN -R KyleH777/careroute` |
 | Tests & migrations → pytest | A test failed | Run the test stack locally (README → Running tests) |
 | Build, scan & publish → Trivy | A **fixable** HIGH/CRITICAL CVE is in the image | The log names the package and fixed version. Bump it in `requirements.txt`, or rebuild to pick up a patched base image |
+| Deploy → Azure login, `AADSTS700213` | The OIDC subject doesn't match the federated credential | The subject must be `repo:KyleH777@88053223/careroute@1383757448:environment:production` (GitHub's immutable-ID form). Check `infra/ci` and that the job still uses `environment: production` |
+| Deploy → Stage 1/2, `AuthorizationFailed` | CI identity lacks a permission | Compare `az role assignment list --assignee <ci principal> --all` with `infra/ci`. Fix in `infra/ci` (human-applied), never by hand |
+| Deploy → Stage 1/2, `state blob is already locked` | Another apply holds the state lock | Wait for it. Only `terraform force-unlock` if you're sure nothing is running |
+| Deploy → Stage 1/2, `listing/retrieving secrets for Container App/Job` | Transient Azure API error | `deploy.sh` already retries once. Re-run the failed job: `gh run rerun <id> --failed` |
+| Deploy → Migrate | The migration failed. **The app was not updated**; the previous revision is serving | Read the step's Alembic output, fix the migration, push. The migrate job is left on the new image until the next deploy |
+| Deploy → Smoke | The new revision didn't become ready, or images don't match | Single revision mode keeps the old revision serving if the new one never gets ready. Check `az containerapp revision list` and system logs |
 
-A red Trivy job means **nothing was published**. Production runs the pinned
-`sha-` tag in `infra/variables.tf`, not `:latest`, so it is unaffected either way.
+A red Trivy job means **nothing was published** and nothing deploys.
+Production runs the `sha-` tags recorded in Terraform state
+(`terraform output app_image`), never `:latest`.
+
+---
+
+## Who can read production secrets
+
+Anyone on this list can read every production secret, or can make something
+that reads them. Review it when people or permissions change.
+
+| Who | How | Accepted in |
+|---|---|---|
+| The operator (`TF_VAR_operator_object_id`) | Key Vault Secrets Officer; Storage Blob Data Contributor on the state container | [ADR-0006](adr/0006-terraform-state-backend.md), [ADR-0008](adr/0008-secrets-generated-into-key-vault.md) |
+| `careroute-ci-id` (GitHub Actions `deploy` job) | Key Vault Secrets Officer; Storage Blob Data Contributor on the state container; Contributor on careroute-rg | [ADR-0011](adr/0011-ci-deploys-via-terraform.md) |
+| **Anyone who can push to `main`, or change `.github/workflows` on it** | Their code runs as `careroute-ci-id` | [ADR-0011](adr/0011-ci-deploys-via-terraform.md) |
+| Each workload identity | Only its own secrets ([AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation)) | [ADR-0010](adr/0010-per-workload-identities-and-db-roles.md) |
+| Anyone who can start a job | That job's secrets, via a command override | [ADR-0010](adr/0010-per-workload-identities-and-db-roles.md) |
+
+**Cut CI off** (compromised repo, leaked workflow): disable deployments
+without touching anything else by deleting the federated credential. Then
+rotate every secret ([AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation)):
+
+```bash
+az identity federated-credential delete -g careroute-ci-rg --identity-name careroute-ci-id -n github-production --yes
+```
+
+Restore it later with `terraform apply` in `infra/ci`.
 
 ---
 
