@@ -4,7 +4,7 @@
 
 <decisions>
 ## Locked (user, 2026-09-28)
-- Alert email: kileharrington@gmail.com. Supplied as `TF_VAR_alert_email` (local env + GitHub `production` env secret `TF_VAR_ALERT_EMAIL`), never committed to the public repo.
+- Alert email: the owner's email (GitHub secret TF_VAR_ALERT_EMAIL). Supplied as `TF_VAR_alert_email` (local env + GitHub `production` env secret `TF_VAR_ALERT_EMAIL`), never committed to the public repo.
 - Log Analytics retention: **90 days** (from 30). Ingestion cap stays 0.5 GB/day.
 - Alert drill: stop Postgres briefly (~15 min, demo down), preceded by a free action-group test notification.
 
