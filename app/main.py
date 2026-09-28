@@ -5,6 +5,8 @@ end to end and to give the backup/restore drill something to verify against.
 """
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -33,6 +35,12 @@ from app.models import (
     ReferralStatus,
     User,
 )
+from app.observability import (
+    RequestContextMiddleware,
+    audit,
+    configure_logging,
+    start_metrics_server,
+)
 from app.referral_rules import (
     ReferralRuleViolation,
     validate_assignment,
@@ -51,7 +59,18 @@ from app.schemas import (
     UserOut,
 )
 
-app = FastAPI(title="CareRoute")
+configure_logging()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Metrics get their own listener (METRICS_PORT), never the API port.
+    start_metrics_server()
+    yield
+
+
+app = FastAPI(title="CareRoute", lifespan=lifespan)
+app.add_middleware(RequestContextMiddleware)
 log = logging.getLogger("careroute")
 
 
@@ -251,6 +270,13 @@ def create_referral(
         )
     )
     session.commit()
+    audit(
+        "referral.created",
+        actor=user.email,
+        referral_id=referral.id,
+        from_status=None,
+        to_status=ReferralStatus.DRAFT.value,
+    )
     session.refresh(referral)
     return referral
 
@@ -302,6 +328,7 @@ def update_referral_status(
         )
 
     validate_transition(referral.status, payload.to_status)
+    from_status = referral.status
 
     session.add(
         ReferralEvent(
@@ -314,6 +341,13 @@ def update_referral_status(
     )
     referral.status = payload.to_status
     session.commit()
+    audit(
+        "referral.status_changed",
+        actor=user.email,
+        referral_id=referral.id,
+        from_status=from_status.value,
+        to_status=payload.to_status.value,
+    )
     session.refresh(referral)
     return referral
 

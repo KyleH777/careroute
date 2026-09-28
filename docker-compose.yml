@@ -69,8 +69,12 @@ services:
     container_name: careroute-api
     ports:
       - "8000:8000"
+      # Prometheus metrics: a separate listener, dev only. On Azure ingress
+      # maps only 8000, so this port is never public (ADR-0012).
+      - "9000:9000"
     environment:
       APP_ENV: local
+      METRICS_PORT: "9000"
       DATABASE_URL: postgresql+psycopg://careroute_app:careroute-app-dev@db:5432/careroute
       # Unset -> the app's built-in dev default. Override from the shell to
       # rehearse a secret rotation: JWT_SECRET=<new> docker compose up -d api
