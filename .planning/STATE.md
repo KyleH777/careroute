@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-09-24)
 ## Current Position
 
 Phase: 4 of 7 (Observability & Central Log Retention)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-09-28 - Phase 3 complete: automated two-stage OIDC deploys live, drill passed, ADR-0011
+Plan: 0 of 3 in current phase
+Status: Ready to execute
+Last activity: 2026-09-28 - Phase 4 planned (3 plans): log/metric alerts, 90-day retention, metrics on unmapped port
 
 Progress: [████░░░░░░] 43%
 
@@ -45,6 +45,7 @@ Recent decisions affecting current work:
 - [Roadmap]: R8 docs first, so later phases amend accurate runbooks
 - [Roadmap]: R6 DB roles before R2 CI deploy, so the pipeline automates the final credential/Terraform shape
 - [Phase 1]: Azure restore = PITR to new server; cutover and in-VNet logical dumps are documented gaps
+- [Phase 4]: No availability probe (cost/scale-to-zero); alerts = 5xx + /ready 503 log-search + is_db_alive metric; email to owner via TF_VAR_alert_email; retention 90 d
 - [Phase 3]: CI runs Terraform (user choice over image-only model); accepted risk: CI reads all secrets; bounded by separate CI RG, constrained RBAC Admin, container-scoped state access
 - [Phase 2]: Split identities per workload + per-secret Key Vault RBAC (user choice); ADR-0010 amends ADR-0008
 - [Phase 2]: PG16 bootstrap order: GRANT migrate TO admin WITH SET TRUE → schema CREATE → ALTER OWNER → SET ROLE migrate for grants/default privileges
@@ -58,7 +59,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 4] Alerting vs scale-to-zero: an external availability probe on `/ready` wakes the app and may keep a replica warm (cost). Research alert signal options (metric/log alerts vs availability tests) against the ~$20/month budget. The existing workspace has a 0.5 GB/day cap and 30-day retention.
 - [Phase 5] The rate limiter must see the real client IP behind Container Apps ingress and share state across replicas without a paid cache (Postgres-backed is a candidate).
 - [General] `.planning/` is public. Never paste secrets, Key Vault values or plan output into planning artifacts.
 
@@ -73,5 +73,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 3 complete. Next: `/gsd:plan-phase 4`. Note: every push to main now deploys (one job run + one revision each).
+Stopped at: Phase 4 planned. Next: `/gsd:execute-phase 4`
 Resume file: None
