@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-09-24)
 
 **Core value:** On every push to `main`, CI deploys the live demo automatically, in ADR-0001 order. When an incident happens, it can be detected, scoped and contained using docs that match the deployed system, all under ~$20/month.
-**Current focus:** Phase 4 - Observability & Central Log Retention
+**Current focus:** Phase 5 - Login Hardening
 
 ## Current Position
 
-Phase: 4 of 7 (Observability & Central Log Retention)
-Plan: 0 of 3 in current phase
-Status: Ready to execute
-Last activity: 2026-09-28 - Phase 4 planned (3 plans): log/metric alerts, 90-day retention, metrics on unmapped port
+Phase: 5 of 7 (Login Hardening)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-09-29 - Phase 4 complete: request IDs, JSON/audit logs in LA (90 d), metrics on :9000, 3 alerts (drill passed); connect-timeout fix pending push
 
-Progress: [████░░░░░░] 43%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
@@ -73,5 +73,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 4 planned. Next: `/gsd:execute-phase 4`
+Stopped at: Phase 4 complete. Open: push de7bbd7 (DB connect timeout); decide on history rewrite for the leaked owner email (595ab32); alert emails partially delivered to Kburton8@live.com. Next: `/gsd:plan-phase 5` (the rate limiter must see the real client IP behind ingress; JSON logs + audit now exist for failed-login events).
 Resume file: None

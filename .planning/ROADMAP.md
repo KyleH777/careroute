@@ -23,7 +23,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Ops Docs Match Deployment** - AZURE, RUNBOOK and INCIDENT-RESPONSE describe the Terraform/Key Vault/private-Postgres system as built
 - [x] **Phase 2: Least-Privilege Database Roles** - The app runs as a DML-only role; only the migrate job can alter schema; nobody uses the server admin
 - [x] **Phase 3: Automated Ordered Deploys** - Every `main` push deploys via OIDC in ADR-0001 order, and a failed migration leaves the old revision serving
-- [ ] **Phase 4: Observability & Central Log Retention** - Request-correlated JSON logs, private `/metrics`, owner alerts, and retained logs in Log Analytics
+- [x] **Phase 4: Observability & Central Log Retention** - Request-correlated JSON logs, private `/metrics`, owner alerts, and retained logs in Log Analytics
 - [ ] **Phase 5: Login Hardening** - `/auth/token` is rate limited per IP and per account, and every attempt is logged
 - [ ] **Phase 6: PHI Read-Access Audit** - The audit trail answers who read which record and records provider assignments, with incident queries to match
 - [ ] **Phase 7: Worklist Cursor Pagination** - `/referrals/worklist` pages by cursor with no skips or duplicates
@@ -83,9 +83,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. In a drill where `/ready` fails (for example the DB is unreachable) or 5xx responses spike, the owner receives an Azure Monitor notification. The alert design works with scale-to-zero left on and stays within the ~$20/month budget.
   4. Application logs and audit events land in Log Analytics with a documented retention period and ingestion cap. They are still queryable after the producing revision/replica is gone, and the runbook contains the queries to find them.
 **Plans**: 3 plans
-- [ ] 04-01-PLAN.md — Request-ID + JSON access/audit logs, Prometheus metrics on an unmapped port (TDD, local) (wave 1)
-- [ ] 04-02-PLAN.md — 90-day retention, email action group, 5xx / ready / is_db_alive alerts via CI; live evidence + Postgres-stop drill (wave 2)
-- [ ] 04-03-PLAN.md — ADR-0012 + KQL runbook queries, alert response, docs (wave 3)
+- [x] 04-01-PLAN.md — Request-ID + JSON access/audit logs, Prometheus metrics on an unmapped port (TDD, local) (wave 1)
+- [x] 04-02-PLAN.md — 90-day retention, email action group, 5xx / ready / is_db_alive alerts via CI; live evidence + Postgres-stop drill (wave 2)
+- [x] 04-03-PLAN.md — ADR-0012 + KQL runbook queries, alert response, docs (wave 3)
 
 ### Phase 5: Login Hardening
 **Goal**: The internet-facing login cannot be brute-forced cheaply, and every attempt leaves evidence an investigator can query.
@@ -129,7 +129,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Ops Docs Match Deployment | 2/2 | Complete | 2026-09-25 |
 | 2. Least-Privilege Database Roles | 3/3 | Complete | 2026-09-26 |
 | 3. Automated Ordered Deploys | 3/3 | Complete | 2026-09-28 |
-| 4. Observability & Central Log Retention | 0/3 | Planned | - |
+| 4. Observability & Central Log Retention | 3/3 | Complete | 2026-09-29 |
 | 5. Login Hardening | 0/TBD | Not started | - |
 | 6. PHI Read-Access Audit | 0/TBD | Not started | - |
 | 7. Worklist Cursor Pagination | 0/TBD | Not started | - |

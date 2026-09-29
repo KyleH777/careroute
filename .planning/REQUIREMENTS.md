@@ -33,10 +33,10 @@
 
 ### Observability [R3]
 
-- [ ] **OBS-01** [R3.1]: Structured JSON logs include a per-request ID, method, path, status and latency. The request ID is returned in a response header
-- [ ] **OBS-02** [R3.2]: Prometheus-format `/metrics` exposes request count/latency by route and status plus DB pool stats. It is not publicly exposed on Azure
-- [ ] **OBS-03** [R3.3]: An Azure Monitor alert notifies the owner when `/ready` fails or the 5xx rate spikes
-- [ ] **OBS-04** [R3.4]: Application and audit logs are retained centrally (Log Analytics) for a defined period, independent of container lifetime
+- [x] **OBS-01** [R3.1]: Structured JSON logs include a per-request ID, method, path, status and latency. The request ID is returned in a response header
+- [x] **OBS-02** [R3.2]: Prometheus-format `/metrics` exposes request count/latency by route and status plus DB pool stats. It is not publicly exposed on Azure
+- [x] **OBS-03** [R3.3]: An Azure Monitor alert notifies the owner when `/ready` fails or the 5xx rate spikes
+- [x] **OBS-04** [R3.4]: Application and audit logs are retained centrally (Log Analytics) for a defined period, independent of container lifetime
 
 ### Login Hardening [R4]
 
@@ -80,10 +80,10 @@ None identified. The PRD lists no deferred-but-planned items. Future candidates 
 | DEPLOY-01 | Phase 3 | Complete |
 | DEPLOY-02 | Phase 3 | Complete |
 | DEPLOY-03 | Phase 3 | Complete |
-| OBS-01 | Phase 4 | Pending |
-| OBS-02 | Phase 4 | Pending |
-| OBS-03 | Phase 4 | Pending |
-| OBS-04 | Phase 4 | Pending |
+| OBS-01 | Phase 4 | Complete |
+| OBS-02 | Phase 4 | Complete |
+| OBS-03 | Phase 4 | Complete |
+| OBS-04 | Phase 4 | Complete |
 | LOGIN-01 | Phase 5 | Pending |
 | LOGIN-02 | Phase 5 | Pending |
 | AUDIT-01 | Phase 6 | Pending |
