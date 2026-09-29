@@ -28,6 +28,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -256,4 +257,40 @@ class User(Base):
     # stored one matches, so lookup is a plain equality on the unique index.
     __table_args__ = (
         CheckConstraint("email = lower(email)", name="ck_users_email_lowercase"),
+    )
+
+
+class LoginOutcome(str, enum.Enum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    RATE_LIMITED = "rate_limited"
+
+
+LOGIN_OUTCOME = Enum(
+    LoginOutcome,
+    name="login_outcome",
+    values_callable=lambda e: [m.value for m in e],
+)
+
+
+class LoginAttempt(Base):
+    """Every /auth/token attempt (ADR-0013): the evidence log, and the
+    counter the rate limiter reads. Never holds the password."""
+
+    __tablename__ = "login_attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # As submitted, lower-cased: attempts on unknown emails are recorded too.
+    email: Mapped[str] = mapped_column(String(254), nullable=False)
+    # Null when the peer isn't a parseable IP (only in tests/local tooling).
+    client_ip: Mapped[str | None] = mapped_column(INET)
+    outcome: Mapped[LoginOutcome] = mapped_column(LOGIN_OUTCOME, nullable=False)
+    request_id: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (
+        Index("ix_login_attempts_email_time", "email", "occurred_at"),
+        Index("ix_login_attempts_ip_time", "client_ip", "occurred_at"),
     )

@@ -41,6 +41,16 @@ class Settings(BaseSettings):
     jwt_secret: str = DEV_JWT_SECRET
     jwt_ttl_minutes: int = 60
 
+    # Login rate limiting (ADR-0013): failures in a sliding window, counted in
+    # Postgres so every replica agrees and restarts don't reset it.
+    login_window_seconds: int = 900
+    login_max_failures_per_email: int = 5
+    login_max_failures_per_ip: int = 20
+    # How many reverse proxies append to X-Forwarded-For in front of the app.
+    # 0 (local): use the socket peer. 1 (Azure Container Apps): the rightmost
+    # entry, which ingress appends; anything a client forges sits left of it.
+    trusted_proxy_hops: int = 0
+
     @model_validator(mode="after")
     def _require_real_secret(self) -> "Settings":
         """Fail fast rather than sign production tokens with a public key."""

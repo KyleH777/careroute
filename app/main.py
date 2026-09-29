@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app import login_guard
 from app.auth import (
     READ_ROLES,
     ROUTING_ROLES,
@@ -28,6 +29,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import (
     Facility,
+    LoginOutcome,
     Patient,
     Provider,
     Referral,
@@ -141,6 +143,7 @@ def stats(session: Session = Depends(get_session)) -> dict[str, int]:
 
 @app.post("/auth/token", response_model=Token)
 def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     session: Session = Depends(get_session),
 ) -> Token:
@@ -148,8 +151,25 @@ def login(
 
     The form field is called `username` because the OAuth2 spec says so;
     CareRoute expects an email address in it.
+
+    Rate limited per email and per client IP (ADR-0013), checked before the
+    password is verified; every attempt is recorded, never the password.
     """
+    email = form.username.lower()[:254]
+    ip = login_guard.client_ip(request)
+    retry_after = login_guard.check(session, email, ip)
+    if retry_after is not None:
+        login_guard.record(session, email, ip, LoginOutcome.RATE_LIMITED)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many login attempts; try again later",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = authenticate(session, form.username, form.password)
+    login_guard.record(
+        session, email, ip, LoginOutcome.SUCCESS if user else LoginOutcome.FAILURE
+    )
     if user is None:
         # Same response for unknown email, wrong password, or inactive
         # account — don't tell a caller which emails exist.
