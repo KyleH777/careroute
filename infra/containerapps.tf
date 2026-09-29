@@ -110,7 +110,9 @@ resource "azurerm_container_app" "api" {
       dynamic "env" {
         # METRICS_PORT: Prometheus on its own listener. Ingress maps only 8000,
         # so metrics are never reachable from the public URL (ADR-0012).
-        for_each = merge(local.app_env_plain, { METRICS_PORT = "9000" })
+        # TRUSTED_PROXY_HOPS: ingress appends the real client IP to
+        # X-Forwarded-For; the app trusts only that rightmost entry (ADR-0013).
+        for_each = merge(local.app_env_plain, { METRICS_PORT = "9000", TRUSTED_PROXY_HOPS = "1" })
         content {
           name  = env.key
           value = env.value
