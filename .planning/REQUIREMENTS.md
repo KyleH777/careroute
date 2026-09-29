@@ -40,8 +40,8 @@
 
 ### Login Hardening [R4]
 
-- [ ] **LOGIN-01** [R4.1]: `/auth/token` is rate limited per client IP and per account, returning 429 with `Retry-After` when a limit is exceeded
-- [ ] **LOGIN-02** [R4.2]: Every login attempt (success or failure, email, IP, time) is logged to the database, never including the password
+- [x] **LOGIN-01** [R4.1]: `/auth/token` is rate limited per client IP and per account, returning 429 with `Retry-After` when a limit is exceeded
+- [x] **LOGIN-02** [R4.2]: Every login attempt (success or failure, email, IP, time) is logged to the database, never including the password
 
 ### PHI Access Audit [R5]
 
@@ -84,8 +84,8 @@ None identified. The PRD lists no deferred-but-planned items. Future candidates 
 | OBS-02 | Phase 4 | Complete |
 | OBS-03 | Phase 4 | Complete |
 | OBS-04 | Phase 4 | Complete |
-| LOGIN-01 | Phase 5 | Pending |
-| LOGIN-02 | Phase 5 | Pending |
+| LOGIN-01 | Phase 5 | Complete |
+| LOGIN-02 | Phase 5 | Complete |
 | AUDIT-01 | Phase 6 | Pending |
 | AUDIT-02 | Phase 6 | Pending |
 | AUDIT-03 | Phase 6 | Pending |

@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-09-24)
 
 **Core value:** On every push to `main`, CI deploys the live demo automatically, in ADR-0001 order. When an incident happens, it can be detected, scoped and contained using docs that match the deployed system, all under ~$20/month.
-**Current focus:** Phase 5 - Login Hardening
+**Current focus:** Phase 6 - PHI Read-Access Audit
 
 ## Current Position
 
-Phase: 5 of 7 (Login Hardening)
-Plan: 0 of 3 in current phase
-Status: Ready to execute
-Last activity: 2026-09-29 - Phase 5 planned (3 plans): Postgres-backed login limits + attempt log
+Phase: 6 of 7 (PHI Read-Access Audit)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-09-29 - Phase 5 complete: Postgres-backed login limits + attempt log live (drill passed)
 
-Progress: [██████░░░░] 57%
+Progress: [███████░░░] 71%
 
 ## Performance Metrics
 
@@ -73,5 +73,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 5 planned. Open: push de7bbd7 (goes out with 05-02's push); decide on history rewrite for the leaked owner email (595ab32). Next: `/gsd:execute-phase 5`
+Stopped at: Phase 5 complete. Open: decide on history rewrite for the leaked owner email (595ab32). Next: `/gsd:plan-phase 6` (audit events can reuse observability.audit + a DB table; login_attempts shows the pattern).
 Resume file: None
