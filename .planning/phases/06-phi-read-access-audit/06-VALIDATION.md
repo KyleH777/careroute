@@ -2,7 +2,7 @@
 phase: 6
 slug: phi-read-access-audit
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-09-29
 ---
@@ -40,13 +40,15 @@ created: 2026-09-29
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | AUDIT-01 | Actor spoofing | Actor taken only from verified token; client `actor` ignored | integration | `pytest tests/test_access_audit.py` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | AUDIT-01 | Audit write failure | Audit insert failure → 5xx, no PHI body | integration | `pytest tests/test_access_audit.py` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | AUDIT-01 | PHI in logs | Log lines carry IDs/actions only (sentinel PHI scan) | integration | `pytest tests/test_access_audit.py` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | AUDIT-01 | — | Every non-exempt route is audited (enumeration) | unit | `pytest tests/test_audit_route_coverage.py` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | AUDIT-02 | — | Assign/reassign records old/new provider + actor + time | integration | `pytest tests/test_access_audit.py -k assign` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | AUDIT-01 | Track erasure | App role lacks UPDATE/DELETE/TRUNCATE on `record_access`, survives `db_roles` re-run | contract | `pytest tests/test_db_roles.py` | ✅ (update) | ⬜ pending |
-| TBD | TBD | TBD | AUDIT-03 | — | Runbook SQL returns expected rows against test DB | integration | `pytest tests/test_access_audit.py -k runbook` | ❌ W0 | ⬜ pending |
+| 06-01-T1 | 01 | 1 | AUDIT-01/02 | T-06-01, T-06-02, T-06-04 | Append-only contract written first (red) | contract | `pytest tests/test_db_roles.py tests/test_record_access_table.py` | ❌ W0 (created here) | ⬜ pending |
+| 06-01-T2 | 01 | 1 | AUDIT-01/02 | T-06-01..04 | App role INSERT/SELECT only on `record_access`, survives `db_roles` re-run; rows survive record delete and `seed --reset` | contract + CI round-trip | full test stack + `alembic downgrade base && upgrade head` | ✅ after T1 | ⬜ pending |
+| 06-02-T1 | 02 | 2 | AUDIT-01/02 | T-06-07..11 | Behaviour, fail-closed, spoof, no-PHI, route-enumeration tests (red) | integration + unit | `pytest tests/test_access_audit.py tests/test_audit_route_coverage.py` | ❌ W0 (created here) | ⬜ pending |
+| 06-02-T2 | 02 | 2 | AUDIT-01/02 | T-06-07..11 | Six PHI routes audit in-transaction; assign records old/new provider; limit 1..100 | integration | full test stack + ruff + mypy | ✅ after T1 | ⬜ pending |
+| 06-03-T1 | 03 | 2 | AUDIT-03 | T-06-14, T-06-15, T-06-18 | Runbook SQL executes via `text()` like `sql()`, time-windowed; prune owner-only | integration + host grep | `pytest tests/test_runbook_record_access.py` + verbatim check | ❌ W0 (created here) | ⬜ pending |
+| 06-03-T2 | 03 | 2 | AUDIT-03 | T-06-16 | Gap text removed; ADR-0014; retention 90 d | doc grep | DOCS-OK grep chain | n/a | ⬜ pending |
+| 06-04-T1 | 04 | 3 | all | T-06-19, T-06-20 | Pre-push gate identical to CI; no token-shaped strings | full suite | full test stack + round-trip + ruff + mypy | ✅ | ⬜ pending |
+| 06-04-T2 | 04 | 3 | all | T-06-19, T-06-21 | Owner approves push + drill | checkpoint | n/a (human) | n/a | ⬜ pending |
+| 06-04-T3 | 04 | 3 | AUDIT-01/02/03 | T-06-20, T-06-22, T-06-23 | Live SQL/KQL return drill rows; live append-only check | manual/live | evidence grep on 06-04-SUMMARY.md | n/a | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

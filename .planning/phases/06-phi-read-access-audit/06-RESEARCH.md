@@ -256,12 +256,12 @@ Not applicable beyond: prefer DB grants over triggers for append-only. A trigger
 | A4 | Decorator marker + behavioural table is the coverage design | Route-enumeration test | Low |
 | A5 | Emit the log line after commit; keep existing `referral.created`/`status_changed` lines | Per-route wiring | Low |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **seed --reset and audit rows (A3).** Recommendation: leave `record_access` alone, document. Planner may surface to the owner.
-2. **Worklist limit cap (A2).** Recommendation: cap at 100.
-3. **AZURE.md 30-day vs 90-day retention.** Check `infra/monitoring.tf`; doc fix only.
-4. **Empty worklist line.** Recommendation: emit a line with empty lists.
+1. **seed --reset and audit rows (A3).** RESOLVED (owner, 2026-09-29): `seed --reset` does not truncate `record_access`; runbook notes ID reuse and every query filters by time window.
+2. **Worklist limit cap (A2).** RESOLVED (owner, 2026-09-29): cap at 1..100; out of range returns 422.
+3. **AZURE.md 30-day vs 90-day retention.** RESOLVED: `infra/containerapps.tf:19` sets `retention_in_days = 90`; AZURE.md/RUNBOOK 30-day text is stale and gets a doc fix.
+4. **Empty worklist line.** RESOLVED: emit the log line with empty ID lists and write no rows (`test_empty_worklist_logs_but_writes_no_rows`).
 
 ## Environment Availability
 

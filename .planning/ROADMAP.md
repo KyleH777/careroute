@@ -110,7 +110,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Assigning or changing a referral's provider writes an audit event with actor, old/new provider and time.
   3. `docs/RUNBOOK.md` and `docs/INCIDENT-RESPONSE.md` contain working queries for "who accessed patient/referral X between T1 and T2" and "everything user Y read or changed". The queries run against the live demo and return the expected rows.
   4. INCIDENT-RESPONSE.md no longer lists read access and provider assignment as audit gaps.
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 06-01-PLAN.md — Append-only `record_access` table: model, migration + guarded REVOKE, db_roles.py revoke, privilege contract (wave 1)
+- [ ] 06-02-PLAN.md — `app/access_audit.py` + six audited PHI routes (fail closed, assign old/new provider, limit 1..100), behavioural + route-enumeration tests (wave 2)
+- [ ] 06-03-PLAN.md — RUNBOOK Record access SQL/KQL/prune (tested), INCIDENT-RESPONSE gaps removed, ADR-0014, 90-day retention fix (wave 2)
+- [ ] 06-04-PLAN.md — Push via CI after owner checkpoint; live drill proves the queries return expected rows (wave 3, non-autonomous)
 
 ### Phase 7: Worklist Cursor Pagination
 **Goal**: API clients can walk the full worklist reliably, page by page, even while referrals change.
@@ -134,5 +138,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Automated Ordered Deploys | 3/3 | Complete | 2026-09-28 |
 | 4. Observability & Central Log Retention | 3/3 | Complete | 2026-09-29 |
 | 5. Login Hardening | 3/3 | Complete | 2026-09-29 |
-| 6. PHI Read-Access Audit | 0/TBD | Not started | - |
+| 6. PHI Read-Access Audit | 0/4 | Planned | - |
 | 7. Worklist Cursor Pagination | 0/TBD | Not started | - |
