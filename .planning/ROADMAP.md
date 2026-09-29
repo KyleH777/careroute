@@ -96,7 +96,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Limits hold across replicas and restarts (scale-to-zero) without adding a paid service beyond the budget.
   3. Below the limit, unknown email, wrong password and inactive account still return the identical 401 with dummy-hash timing equalization (ADR-0003). The existing tests for this keep passing.
   4. Every attempt, success or failure, is recorded in the database with email, client IP, time and outcome, and never the password. The runbook has a query for "failed logins for account X / from IP Y in the last N hours".
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 05-01-PLAN.md — login_attempts table, Postgres-backed per-email/per-IP failure limits (429 + Retry-After, checked before verify), XFF hop rule, TDD (wave 1)
+- [ ] 05-02-PLAN.md — TRUSTED_PROXY_HOPS=1 on Azure, deploy via CI, live forged-XFF + persistence drill (wave 2)
+- [ ] 05-03-PLAN.md — ADR-0013 + runbook login-attempt queries (wave 3)
 
 ### Phase 6: PHI Read-Access Audit
 **Goal**: During an incident, the owner can answer "who read or changed which referral/patient record, and when" from the audit trail.
@@ -130,6 +133,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Least-Privilege Database Roles | 3/3 | Complete | 2026-09-26 |
 | 3. Automated Ordered Deploys | 3/3 | Complete | 2026-09-28 |
 | 4. Observability & Central Log Retention | 3/3 | Complete | 2026-09-29 |
-| 5. Login Hardening | 0/TBD | Not started | - |
+| 5. Login Hardening | 0/3 | Planned | - |
 | 6. PHI Read-Access Audit | 0/TBD | Not started | - |
 | 7. Worklist Cursor Pagination | 0/TBD | Not started | - |

@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-09-24)
 ## Current Position
 
 Phase: 5 of 7 (Login Hardening)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-09-29 - Phase 4 complete: request IDs, JSON/audit logs in LA (90 d), metrics on :9000, 3 alerts (drill passed); connect-timeout fix pending push
+Plan: 0 of 3 in current phase
+Status: Ready to execute
+Last activity: 2026-09-29 - Phase 5 planned (3 plans): Postgres-backed login limits + attempt log
 
 Progress: [██████░░░░] 57%
 
@@ -45,6 +45,7 @@ Recent decisions affecting current work:
 - [Roadmap]: R8 docs first, so later phases amend accurate runbooks
 - [Roadmap]: R6 DB roles before R2 CI deploy, so the pipeline automates the final credential/Terraform shape
 - [Phase 1]: Azure restore = PITR to new server; cutover and in-VNet logical dumps are documented gaps
+- [Phase 5]: Login limits in Postgres (5 failures/email, 20/IP, 15 min), checked before verify; client IP = rightmost XFF (TRUSTED_PROXY_HOPS=1 on Azure)
 - [Phase 4]: No availability probe (cost/scale-to-zero); alerts = 5xx + /ready 503 log-search + is_db_alive metric; email to owner via TF_VAR_alert_email; retention 90 d
 - [Phase 3]: CI runs Terraform (user choice over image-only model); accepted risk: CI reads all secrets; bounded by separate CI RG, constrained RBAC Admin, container-scoped state access
 - [Phase 2]: Split identities per workload + per-secret Key Vault RBAC (user choice); ADR-0010 amends ADR-0008
@@ -59,7 +60,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 5] The rate limiter must see the real client IP behind Container Apps ingress and share state across replicas without a paid cache (Postgres-backed is a candidate).
 - [General] `.planning/` is public. Never paste secrets, Key Vault values or plan output into planning artifacts.
 
 ## Deferred Items
@@ -73,5 +73,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-09-25
-Stopped at: Phase 4 complete. Open: push de7bbd7 (DB connect timeout); decide on history rewrite for the leaked owner email (595ab32); alert emails partially delivered to Kburton8@live.com. Next: `/gsd:plan-phase 5` (the rate limiter must see the real client IP behind ingress; JSON logs + audit now exist for failed-login events).
+Stopped at: Phase 5 planned. Open: push de7bbd7 (goes out with 05-02's push); decide on history rewrite for the leaked owner email (595ab32). Next: `/gsd:execute-phase 5`
 Resume file: None
