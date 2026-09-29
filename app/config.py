@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # fails with a stale-connection error.
     db_pool_pre_ping: bool = True
     db_pool_size: int = 5
+    # Give up on a new connection after this many seconds. Without it, a
+    # stopped or unreachable server makes every request (and /ready) hang on
+    # the TCP connect: during the 2026-09-28 drill /ready took a median of
+    # 130 s to return 503. Fail fast instead.
+    db_connect_timeout: int = 5
     db_max_overflow: int = 5
 
     # HS256 signing key for access tokens. Generate a real one with:
