@@ -301,6 +301,12 @@ object storage, never in version control.
 - **[Architecture decisions](docs/adr/README.md)**: why it's built this way,
   one short record per decision (probes, auth, audit, image, state, network,
   secrets, demo access).
+- **Observability**: every response carries an `X-Request-ID` header; logs
+  are JSON (one line per request, plus `event=audit` lines for referral
+  changes) and are kept 90 days in Log Analytics; Prometheus metrics are on
+  port 9000 (locally `http://localhost:9000`, never on the public URL); Azure
+  Monitor emails the owner on 5xx spikes, `/ready` failures and database
+  outages ([ADR-0012](docs/adr/0012-alerting-without-availability-probes.md)).
 - **[Incident response](docs/INCIDENT-RESPONSE.md)**: severity levels, roles,
   communication, the security/PHI-exposure path, known gaps, and a
   post-incident review template.

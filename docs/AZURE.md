@@ -126,6 +126,10 @@ export TF_VAR_operator_object_id=$(az ad signed-in-user show --query id -o tsv)
 ```
 
 ```bash
+export TF_VAR_alert_email=<owner's alert address>   # same value as the TF_VAR_ALERT_EMAIL GitHub secret
+```
+
+```bash
 terraform apply -var app_image=ghcr.io/kyleh777/careroute:sha-<tag> -var migrate_image=ghcr.io/kyleh777/careroute:sha-<tag>
 ```
 
@@ -208,8 +212,11 @@ default, so every apply must say which images to keep. Take them from the live
 state, so a manual apply never moves images:
 
 ```bash
-cd infra && export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv) TF_VAR_operator_object_id=$(az ad signed-in-user show --query id -o tsv)
+cd infra && export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv) TF_VAR_operator_object_id=$(az ad signed-in-user show --query id -o tsv) TF_VAR_alert_email=<owner's alert address>
 ```
+
+(The alert address must match the `TF_VAR_ALERT_EMAIL` GitHub environment
+secret, or your apply and the next CI deploy will flip it back and forth.)
 
 ```bash
 TF_IMAGES=(-var "app_image=$(terraform output -raw app_image)" -var "migrate_image=$(terraform output -raw migrate_image)")
@@ -276,9 +283,24 @@ docker compose run --rm migrate alembic upgrade head --sql
 
 ---
 
-## Logs
+## Logs, metrics and alerts
 
-API console output, most recent first:
+### What the API logs
+
+Every response carries an **`X-Request-ID`** header (a well-formed one sent by
+the client is kept, otherwise a uuid4 is generated). Ask anyone reporting a
+problem for it. The API writes JSON, one object per line
+([ADR-0012](adr/0012-alerting-without-availability-probes.md)):
+
+| `event` | Logger | Fields |
+|---|---|---|
+| `request` | `careroute.access` | `request_id`, `method`, `route` (template, e.g. `/referrals/{referral_id}`), `path` (no query string), `status`, `duration_ms`. Exactly one per request |
+| `audit` | `careroute.audit` | `request_id`, `action` (`referral.created`, `referral.status_changed`), `actor`, `referral_id`, `from_status`, `to_status`. No notes or reasons |
+| (none) | `careroute.error` etc. | `msg`, `request_id`, `exc` (traceback) for unhandled errors, which still return a JSON 500 with the header |
+
+### Where logs live
+
+Live output from a running replica:
 
 ```bash
 az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 100
@@ -286,11 +308,9 @@ az containerapp logs show -g careroute-rg -n careroute-api --type console --tail
 
 Add `--follow` to stream. Use `--type system` for platform events such as
 image pulls, probe failures, Key Vault reference errors and restarts.
-
-`logs show` streams from a **running replica**. If the API has scaled to zero,
-it starts one (seen 2026-09-25), which costs a few seconds of compute and shows
-only that fresh replica's output. For anything that happened before, use Log
-Analytics, below.
+`logs show` needs a **running replica**. If the API has scaled to zero, it
+starts one, which costs a few seconds of compute and shows only that fresh
+replica's output.
 
 A job's output (defaults to its latest execution):
 
@@ -298,25 +318,66 @@ A job's output (defaults to its latest execution):
 az containerapp job logs show -g careroute-rg -n careroute-migrate --container migrate
 ```
 
-Anything older, or anything you need to filter, is in the Log Analytics
-workspace `careroute-logs`, table `ContainerAppConsoleLogs_CL`:
+**Everything else is in Log Analytics** (workspace `careroute-logs`, table
+`ContainerAppConsoleLogs_CL`, JSON in `Log_s`). It outlives revisions and
+replicas: on 2026-09-28 it still returned lines from three revisions that no
+longer existed. Parse the JSON with `parse_json(Log_s)`. Ready-made queries are
+in RUNBOOK → Log queries. From the CLI:
 
-```kusto
-ContainerAppConsoleLogs_CL
-| where ContainerAppName_s == "careroute-api"
-| where TimeGenerated > ago(1h)
-| project TimeGenerated, RevisionName_s, Log_s
-| order by TimeGenerated desc
+```bash
+WS=$(az monitor log-analytics workspace show -g careroute-rg -n careroute-logs --query customerId -o tsv)
 ```
 
-Two limits to know during an incident:
-- Retention is **30 days**. Export anything you need as evidence before it
-  ages out.
-- Ingestion is capped at **0.5 GB/day** as a cost guard. Past the cap, logs
-  **stop being collected** until the next day. A noisy failure can therefore
-  hide the logs that come after it.
+```bash
+az monitor log-analytics query -w $WS --analytics-query "ContainerAppConsoleLogs_CL | extend e = parse_json(Log_s) | where tostring(e.request_id) == '<id>' | project TimeGenerated, RevisionName_s, Log_s" -o table
+```
 
----
+Limits:
+- **Retention is 90 days** (set in `infra/containerapps.tf`). Export anything
+  you need as evidence beyond that.
+- Ingestion is capped at **0.5 GB/day** as a cost guard. Past the cap, logs
+  **stop being collected** until the next day, and so do the two log-based
+  alerts below. A noisy failure can hide what comes after it.
+
+### Metrics
+
+Prometheus metrics are served on **port 9000 only**, by a separate listener.
+Ingress maps only 8000, so `<api_url>/metrics` is a 404 and 9000 isn't
+reachable from outside. Series: `careroute_http_requests_total` and
+`careroute_http_request_duration_seconds` (by `method`, `route`, `status`),
+`careroute_db_pool_size`, `_checked_out` and `_overflow`. To read them, run
+inside the replica (`script` supplies the terminal `az containerapp exec`
+insists on):
+
+```bash
+script -q /dev/null az containerapp exec -g careroute-rg -n careroute-api --command "python -c \"import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:9000').read().decode())\""
+```
+
+Locally, Compose publishes it at `http://localhost:9000`.
+
+### Alerts
+
+All three email the owner through action group `careroute-owner` (the address
+comes from `TF_VAR_alert_email`: the GitHub environment secret, or your shell
+for manual applies). Why these and not an availability probe:
+[ADR-0012](adr/0012-alerting-without-availability-probes.md).
+
+| Alert | Signal | Fires when | Severity |
+|---|---|---|---|
+| `careroute-db-down` | Postgres metric `is_db_alive` | < 1 over 5 min. Works with zero traffic | 0 |
+| `careroute-ready-failing` | Log search on `event=request` | any `/ready` 503 in 5 min | 1 |
+| `careroute-5xx-spike` | Log search on `event=request` | ≥ 5 responses with status ≥ 500 in 5 min | 2 |
+
+They resolve automatically, and you get a second email when they do.
+
+**Drill, 2026-09-28** (Postgres stopped): `5xx-spike` fired at 12:48,
+`ready-failing` at 12:50 and `db-down` at 12:51, 1-4 minutes after the server
+stopped. All three resolved on their own after it was started again. Azure ran
+the action group for all six transitions; only some emails reached the inbox,
+so check Junk/Other and consider adding a second receiver (Azure mobile app
+push). The drill also found that `/ready` hung for minutes instead of 503ing
+fast. Fixed with a 5 s connect timeout (`DB_CONNECT_TIMEOUT`). What to do when one fires: RUNBOOK
+→ When an alert fires. Cost: about $2-4/month.
 
 ## Querying the database from inside the VNet
 

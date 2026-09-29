@@ -16,7 +16,9 @@ the outage path.
 Declare one if **any** of these is true:
 
 - Referrals can't be created, read or routed (the core workflow is down)
-- Error rate is clearly elevated (a burst of 500s, `/ready` returning 503)
+- Error rate is clearly elevated (a burst of 500s, `/ready` returning 503).
+  Azure Monitor emails the owner for these and for a database outage
+  (RUNBOOK → When an alert fires); an alert email counts as detection
 - Data is wrong, missing, or was changed by someone who shouldn't have
 - A credential, secret, backup file or database dump may have leaked
 - An account is behaving in a way its owner doesn't recognize
@@ -87,7 +89,7 @@ docker compose logs --timestamps > backups/incident-logs-$(date -u +%Y%m%dT%H%M%
   recover the database as it was at any moment in the last 7 days, so the
   timestamp *is* the snapshot. Don't restore yet unless you need to
   ([AZURE.md → Backups and restore](AZURE.md#backups-and-restore)).
-- **Export the logs now.** Log Analytics keeps 30 days, and ingestion stops for
+- **Export the logs now.** Log Analytics keeps 90 days, and ingestion stops for
   the day past the 0.5 GB cap. Query `ContainerAppConsoleLogs_CL` for the
   incident window and save the results into `backups/`
   ([AZURE.md → Logs](AZURE.md#logs)).
@@ -163,6 +165,10 @@ accessed, changed or leaked by someone unauthorized.
 
 ### Scope: what can we actually prove?
 
+The audit trail exists twice: the `referral_events` table, and `event=audit`
+lines in Log Analytics (90 days, independent of the database, so they survive
+a restore). Queries: RUNBOOK → Log queries.
+
 What the system records:
 
 ```sql
@@ -215,8 +221,7 @@ These gaps directly limit incident response. They are the priority list:
 |---|---|
 | No read/access logging | Can't scope what a compromised account viewed |
 | No login rate limiting or failed-login log | Password guessing is invisible |
-| No monitoring or alerting | Incidents are found by users, not by us. `/ready` returns 503 correctly, but nothing watches it yet |
-| No central log retention | Evidence disappears with the container |
+| Alerting has a zero-traffic blind spot | DB outages, 5xx spikes and `/ready` failures now email the owner (ADR-0012), but an API that can't start while nobody is using it isn't noticed until the next request |
 | Assignment not in the audit log | Can't reconstruct who routed a patient where |
 | Single-region, single database | No failover; a database outage is a full outage |
 

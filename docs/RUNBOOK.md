@@ -420,6 +420,92 @@ Restore it later with `terraform apply` in `infra/ci`.
 
 ---
 
+## Log queries
+
+Paste into the Log Analytics workspace `careroute-logs` (Portal → Logs), or run
+with `az monitor log-analytics query -w <workspace id> --analytics-query "..."`
+(workspace id: AZURE.md → Where logs live). Logs are kept 90 days and outlive
+the revision and replica that wrote them. Every query below was run against
+the live workspace on 2026-09-29.
+
+A request someone reports (ask for the `X-Request-ID` response header):
+
+```kusto
+ContainerAppConsoleLogs_CL
+| extend e = parse_json(Log_s)
+| where tostring(e.request_id) == "<request-id>"
+| project TimeGenerated, RevisionName_s, Log_s
+```
+
+5xx responses in a window, by route:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where TimeGenerated between (datetime(<T1>) .. datetime(<T2>))
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "request" and toint(e.status) >= 500
+| summarize n = count(), p50_ms = percentile(todouble(e.duration_ms), 50) by route = tostring(e.route), status = toint(e.status)
+```
+
+`/ready` failures over time (a database outage looks like this):
+
+```kusto
+ContainerAppConsoleLogs_CL
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "request" and tostring(e.route) == "/ready" and toint(e.status) != 200
+| summarize n = count() by bin(TimeGenerated, 5m)
+```
+
+Everything user Y changed (audit), newest first:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "audit" and tostring(e.actor) == "<email>"
+| project TimeGenerated, action = tostring(e.action), referral_id = toint(e.referral_id), from_status = tostring(e.from_status), to_status = tostring(e.to_status), request_id = tostring(e.request_id)
+| order by TimeGenerated desc
+```
+
+Who changed referral X between T1 and T2:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where TimeGenerated between (datetime(<T1>) .. datetime(<T2>))
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "audit" and toint(e.referral_id) == <id>
+| project TimeGenerated, actor = tostring(e.actor), action = tostring(e.action), from_status = tostring(e.from_status), to_status = tostring(e.to_status), request_id = tostring(e.request_id)
+```
+
+Logs from a revision that no longer exists:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where RevisionName_s == "<revision>"
+| project TimeGenerated, Log_s
+| order by TimeGenerated asc
+```
+
+The audit trail only covers changes. **Reads are not audited yet**
+(INCIDENT-RESPONSE → Known limitations; roadmap Phase 6).
+
+---
+
+## When an alert fires
+
+Alerts email the owner ([AZURE.md → Alerts](AZURE.md#alerts)). Each resolves
+itself, with a second email, once the condition clears.
+
+| Alert | First check | Then |
+|---|---|---|
+| `careroute-db-down` (sev 0) | `az postgres flexible-server show -g careroute-rg -n <server> --query state` | `Stopped`: `az postgres flexible-server start`. Otherwise check Azure status/maintenance, then [Database unreachable](#database-unreachable). The API recovers by itself once the DB is back |
+| `careroute-ready-failing` (sev 1) | The `/ready` failures query above; is `db-down` also firing? | With db-down: fix the DB. Without: the API can't reach a healthy DB. Check its system logs (Key Vault reference, network) and [Database unreachable](#database-unreachable) |
+| `careroute-5xx-spike` (sev 2) | The 5xx-by-route query above, then one request by ID for the traceback (`careroute.error` lines carry `exc`) | Just after a deploy: roll back ([Bad deploy](#bad-deploy--rollback)). Otherwise fix forward |
+
+Metrics during an incident (per-route rates and latency, DB pool usage):
+AZURE.md → Metrics. Locally: `curl localhost:9000`.
+
+---
+
 ## Reference
 
 | Thing | Where |
