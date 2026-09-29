@@ -10,7 +10,7 @@ completed: 2026-09-29
 
 - Terraform: `monitoring.tf` (action group `careroute-owner`, log-search alerts `careroute-5xx-spike` / `careroute-ready-failing` at 5-min evaluation, metric alert `careroute-db-down` on `is_db_alive`); retention 30 → 90; API `METRICS_PORT=9000`; `alert_email` (sensitive, no default) via `TF_VAR_alert_email` / GitHub secret `TF_VAR_ALERT_EMAIL`.
 - Deployed by CI run 36421874333 (sha-2093022): stage 1 "4 added, 3 changed", migrate Succeeded, stage 2 "3 changed", smoke active `careroute-api--0000005`.
-- **Alert email changed to Kburton8@live.com** at the user's request (GitHub secret updated before the deploy job started, so the action group was created with it; a local plan then showed no changes; the live receiver was confirmed).
+- **Alert email changed to the owner's alert address (GitHub secret TF_VAR_ALERT_EMAIL)** at the user's request (GitHub secret updated before the deploy job started, so the action group was created with it; a local plan then showed no changes; the live receiver was confirmed).
 
 ## Evidence
 - C1: `X-Request-ID: evidence-1790599063` echoed; Log Analytics by request_id → `/ready 200 5.08 ms` on `--0000005`.
