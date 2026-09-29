@@ -165,6 +165,10 @@ accessed, changed or leaked by someone unauthorized.
 
 ### Scope: what can we actually prove?
 
+Login attempts, successful or not, are in `login_attempts` and in Log
+Analytics (`auth.login`), with email, client IP and time: who tried which
+account from where (RUNBOOK → Login attempts).
+
 The audit trail exists twice: the `referral_events` table, and `event=audit`
 lines in Log Analytics (90 days, independent of the database, so they survive
 a restore). Queries: RUNBOOK → Log queries.
@@ -220,7 +224,6 @@ These gaps directly limit incident response. They are the priority list:
 | Gap | Why it matters in an incident |
 |---|---|
 | No read/access logging | Can't scope what a compromised account viewed |
-| No login rate limiting or failed-login log | Password guessing is invisible |
 | Alerting has a zero-traffic blind spot | DB outages, 5xx spikes and `/ready` failures now email the owner (ADR-0012), but an API that can't start while nobody is using it isn't noticed until the next request |
 | Assignment not in the audit log | Can't reconstruct who routed a patient where |
 | Single-region, single database | No failover; a database outage is a full outage |

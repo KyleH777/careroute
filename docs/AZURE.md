@@ -339,6 +339,15 @@ Limits:
   **stop being collected** until the next day, and so do the two log-based
   alerts below. A noisy failure can hide what comes after it.
 
+### Client IPs behind ingress
+
+Container Apps ingress (Envoy) appends the connecting client's IP to
+`X-Forwarded-For`. The API is deployed with `TRUSTED_PROXY_HOPS=1`, so it uses
+only that rightmost entry for login rate limiting and the login-attempt log;
+anything a client forges sits to its left and is ignored
+([ADR-0013](adr/0013-login-rate-limiting.md); verified live 2026-09-29).
+Change this only if another proxy is put in front of ingress.
+
 ### Metrics
 
 Prometheus metrics are served on **port 9000 only**, by a separate listener.

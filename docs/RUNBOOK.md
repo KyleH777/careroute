@@ -191,6 +191,72 @@ job (`careroute_app`;
 with `.commit()` after `execute`. This **writes to live data**. Double-check the
 email before you run it.
 
+### Login attempts (rate limiting and evidence)
+
+`/auth/token` allows 5 failures per email and 20 per client IP in a sliding
+15-minute window, then answers `429` with `Retry-After`
+([ADR-0013](adr/0013-login-rate-limiting.md)). Every attempt is a row in
+`login_attempts` (email, client IP, outcome `success`/`failure`/`rate_limited`,
+time, request ID; never the password) and an `auth.login` audit line in Log
+Analytics.
+
+**Azure:** run SQL as the app role through the seed job
+([AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)).
+Define this once per shell (it prints the execution name; read the output with
+`az containerapp job logs show -g careroute-rg -n careroute-seed --container seed --execution <name> --format text`):
+
+```bash
+IMG=$(az containerapp job show -g careroute-rg -n careroute-seed --query "properties.template.containers[0].image" -o tsv)
+READ_ENV=(APP_ENV=production PYTHONUNBUFFERED=1 DATABASE_URL=secretref:database-url)
+sql() { az containerapp job start -g careroute-rg -n careroute-seed --container-name seed --image "$IMG" --env-vars "${READ_ENV[@]}" --command python --args "-cimport os, sqlalchemy as sa; c = sa.create_engine(os.environ['DATABASE_URL']).connect(); r = c.execute(sa.text(\"$1\")); [print(tuple(map(str, x))) for x in r] if r.returns_rows else print('rows affected:', r.rowcount); c.commit()" --query name -o tsv; }
+```
+
+Locally, the same SQL works in `docker compose exec db psql -U careroute -d careroute -c "..."`.
+
+Failed logins for account X in the last N hours:
+
+```bash
+sql "select occurred_at, host(client_ip), outcome, request_id from login_attempts where email = 'x@example.com' and outcome <> 'success' and occurred_at > now() - interval '24 hours' order by occurred_at desc"
+```
+
+Everything from IP Y in the last N hours (which accounts it tried):
+
+```bash
+sql "select email, outcome, count(*), max(occurred_at) from login_attempts where client_ip = '203.0.113.7' and occurred_at > now() - interval '24 hours' group by 1, 2 order by 3 desc"
+```
+
+Top IPs by failures in the last 24 hours (a spray shows up as one IP, many emails):
+
+```bash
+sql "select host(client_ip), count(*) as failures, count(distinct email) as emails from login_attempts where outcome <> 'success' and occurred_at > now() - interval '24 hours' group by 1 order by 2 desc limit 20"
+```
+
+**Unlock an account early** (a user locked out by someone else's failed
+attempts; see ADR-0013). This removes only the failures still inside the
+window. The history of the attempts stays in Log Analytics:
+
+```bash
+sql "delete from login_attempts where email = 'x@example.com' and outcome = 'failure' and occurred_at > now() - interval '15 minutes'"
+```
+
+**Prune** (the table grows with every attempt, attacks included; there's no
+automatic cleanup yet):
+
+```bash
+sql "delete from login_attempts where occurred_at < now() - interval '90 days'"
+```
+
+The same evidence in Log Analytics (it survives a database restore):
+
+```kusto
+ContainerAppConsoleLogs_CL
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "audit" and tostring(e.action) == "auth.login"
+| where tostring(e.email) == "x@example.com" or tostring(e.client_ip) == "203.0.113.7"
+| project TimeGenerated, email = tostring(e.email), client_ip = tostring(e.client_ip), outcome = tostring(e.outcome), request_id = tostring(e.request_id)
+| order by TimeGenerated desc
+```
+
 ### Invalidate everyone's tokens (suspected `JWT_SECRET` leak)
 
 Rotate the secret. Every existing token instantly fails signature checks.

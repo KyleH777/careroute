@@ -163,6 +163,11 @@ Design decisions:
 - **Login doesn't leak which emails exist.** Unknown email, wrong password and
   inactive account all return the same 401, and an unknown email still runs a
   full argon2 verify so response timing matches.
+- **Login can't be brute-forced cheaply.** 5 failures per email or 20 per
+  client IP within 15 minutes get `429` with `Retry-After`, checked before the
+  password is even verified, and every attempt (never the password) is
+  recorded in `login_attempts`
+  ([ADR-0013](docs/adr/0013-login-rate-limiting.md)).
 - **Production can't start with the dev secret.** With `APP_ENV` set to
   anything other than `local`/`dev`/`test`, the app refuses to boot unless
   `JWT_SECRET` is set. The seed script likewise refuses to run, since its demo

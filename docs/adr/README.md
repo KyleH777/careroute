@@ -17,3 +17,4 @@ context that forced it, and what it costs.
 | [0010](0010-per-workload-identities-and-db-roles.md) | Least-privilege database roles and per-workload identities |
 | [0011](0011-ci-deploys-via-terraform.md) | CI deploys by running Terraform, in two stages |
 | [0012](0012-alerting-without-availability-probes.md) | Alerting from logs and a database metric, not availability probes |
+| [0013](0013-login-rate-limiting.md) | Login rate limiting and attempt log in Postgres |
