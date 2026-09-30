@@ -18,3 +18,4 @@ context that forced it, and what it costs.
 | [0011](0011-ci-deploys-via-terraform.md) | CI deploys by running Terraform, in two stages |
 | [0012](0012-alerting-without-availability-probes.md) | Alerting from logs and a database metric, not availability probes |
 | [0013](0013-login-rate-limiting.md) | Login rate limiting and attempt log in Postgres |
+| [0014](0014-phi-access-audit.md) | PHI access audit in an append-only table and the log |

@@ -43,7 +43,7 @@ reviewed, not rehearsed.
 | Key Vault | `kv-careroute-<suffix>` | Every secret, RBAC mode, 7-day soft delete |
 | Managed identities | `careroute-app-id` (API), `careroute-migrate-id`, `careroute-seed-id`, `careroute-dbbootstrap-id` | One per workload ([ADR-0010](adr/0010-per-workload-identities-and-db-roles.md)) |
 | Role assignments | Key Vault Secrets Officer (whoever runs Terraform, vault-wide); Key Vault Secrets User **per secret** for each workload identity | Write vs. read access. Each workload reads only its own secrets (see [Secrets and rotation](#secrets-and-rotation)) |
-| Log Analytics workspace | `careroute-logs` | Container logs, 30-day retention, 0.5 GB/day ingestion cap |
+| Log Analytics workspace | `careroute-logs` | Container logs, 90-day retention, 0.5 GB/day ingestion cap |
 | Container Apps environment | `careroute-env` | Consumption workload profile, VNet-integrated |
 | Container App | `careroute-api` | The API. External ingress on port 8000, 0-2 replicas, liveness `/health`, readiness `/ready` |
 | Container Apps Job | `careroute-migrate` | `alembic upgrade head`, manual trigger |
@@ -251,7 +251,7 @@ READ_ENV=(APP_ENV=production PYTHONUNBUFFERED=1 DATABASE_URL=secretref:database-
 ```
 
 `MIGRATE_ENV` is for the migrate job (schema owner). `READ_ENV` is for the
-seed job (DML-only app role), which is the one to use for queries.
+seed job (DML-only app role; `record_access` is insert/read only, ADR-0014), which is the one to use for queries.
 
 ---
 
