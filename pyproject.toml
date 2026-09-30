@@ -4,8 +4,9 @@
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-# Alembic-generated revisions are kept byte-for-byte as generated.
-extend-exclude = ["migrations/versions", "docs"]
+# Alembic-generated revisions are kept byte-for-byte as generated; docs and
+# .planning hold illustrative snippets, not shipped code.
+extend-exclude = ["migrations/versions", "docs", ".planning"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "RUF"]
