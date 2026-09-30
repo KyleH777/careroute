@@ -45,8 +45,8 @@
 
 ### PHI Access Audit [R5]
 
-- [ ] **AUDIT-01** [R5.1]: Every read endpoint records who read which referral/patient record, and when
-- [ ] **AUDIT-02** [R5.2]: Provider assignments are recorded in the audit trail
+- [x] **AUDIT-01** [R5.1]: Every read endpoint records who read which referral/patient record, and when
+- [x] **AUDIT-02** [R5.2]: Provider assignments are recorded in the audit trail
 - [ ] **AUDIT-03** [R5.3]: Runbook and incident queries are updated to use the new logs
 
 ### API Polish [R7]
@@ -86,12 +86,13 @@ None identified. The PRD lists no deferred-but-planned items. Future candidates 
 | OBS-04 | Phase 4 | Complete |
 | LOGIN-01 | Phase 5 | Complete |
 | LOGIN-02 | Phase 5 | Complete |
-| AUDIT-01 | Phase 6 | Pending |
-| AUDIT-02 | Phase 6 | Pending |
+| AUDIT-01 | Phase 6 | Complete |
+| AUDIT-02 | Phase 6 | Complete |
 | AUDIT-03 | Phase 6 | Pending |
 | API-01 | Phase 7 | Pending |
 
 **Coverage:**
+
 - v1 requirements (open): 17 total
 - Mapped to phases: 17
 - Unmapped: 0
