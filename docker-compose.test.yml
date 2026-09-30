@@ -71,4 +71,10 @@ services:
       DATABASE_URL: postgresql+psycopg://careroute_app:careroute-app-test@db:5432/careroute
       # Fixture cleanup only: TRUNCATE ... RESTART IDENTITY needs the owner.
       OWNER_DATABASE_URL: postgresql+psycopg://careroute_migrate:careroute-migrate-test@db:5432/careroute
+      # Only for the db_roles re-run test (append-only survives bootstrap) in
+      # this ephemeral stack. Same values as the db-roles service, so a re-run
+      # leaves the passwords unchanged.
+      ADMIN_DATABASE_URL: postgresql+psycopg://careroute:careroute@db:5432/careroute
+      MIGRATE_DB_PASSWORD: careroute-migrate-test
+      APP_DB_PASSWORD: careroute-app-test
     command: ["pytest", "-v", "-p", "no:cacheprovider", "--cov=app", "--cov-report=term-missing"]

@@ -53,7 +53,7 @@ def clean_tables():
         conn.execute(
             text(
                 "TRUNCATE TABLE referral_events, referrals, patients, "
-                "providers, facilities, users, login_attempts "
+                "providers, facilities, users, login_attempts, record_access "
                 "RESTART IDENTITY CASCADE"
             )
         )
