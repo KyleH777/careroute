@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 6 context gathered
-last_updated: "2026-09-30T12:14:00.405Z"
+last_updated: "2026-09-30T12:33:14.865Z"
 last_activity: 2026-09-30
 progress:
   total_phases: 7
@@ -80,6 +80,7 @@ None yet.
 ### Blockers/Concerns
 
 - [General] `.planning/` is public. Never paste secrets, Key Vault values or plan output into planning artifacts.
+- 06-04: CI run 36714319052 (5d33c9f) blocked at Trivy by base-image OpenSSL CVE-2026-75804/84782 (dhi.io/python:3.12-debian13 has deb13u2+dhi1, fix deb13u3). Owner decision 2026-09-30: wait for DHI rebuild, then re-run failed jobs (no push). Pushes used 2/3; push 3 reserved for docs-only verified-live notes. Owner coordinator re-assign pending after deploy.
 
 ## Deferred Items
 
