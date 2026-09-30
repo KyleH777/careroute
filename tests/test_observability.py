@@ -72,8 +72,12 @@ def test_status_change_emits_audit_line(client, submitted_referral, caplog):
         json={"to_status": "accepted", "note": "free text stays out of logs"},
     )
     assert response.status_code == 200
-    lines = [_json(r) for r in _records(caplog, "careroute.audit")]
-    assert len(lines) == 1
+    lines = [
+        ln
+        for ln in (_json(r) for r in _records(caplog, "careroute.audit"))
+        if ln["action"] == "referral.status_changed"
+    ]
+    assert [ln["action"] for ln in lines] == ["referral.status_changed"]
     audit = lines[0]
     assert audit["event"] == "audit"
     assert audit["action"] == "referral.status_changed"
@@ -98,8 +102,11 @@ def test_create_referral_emits_audit_line(client, patient, facility, caplog):
         },
     )
     assert response.status_code == 201
-    audit = _json(_records(caplog, "careroute.audit")[-1])
-    assert audit["action"] == "referral.created"
+    audit = next(
+        ln
+        for ln in (_json(r) for r in _records(caplog, "careroute.audit"))
+        if ln["action"] == "referral.created"
+    )
     assert audit["referral_id"] == response.json()["id"]
     assert audit["from_status"] is None
     assert audit["to_status"] == "draft"

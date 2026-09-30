@@ -8,14 +8,14 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app import login_guard
+from app import access_audit, login_guard
 from app.auth import (
     READ_ROLES,
     ROUTING_ROLES,
@@ -191,29 +191,39 @@ def me(user: User = Depends(get_current_user)) -> User:
 
 
 @app.get("/referrals/worklist")
+@access_audit.audited("referral.list")
 def worklist(
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=100),
     session: Session = Depends(get_session),
-    _user: User = Depends(require_role(*READ_ROLES)),
+    user: User = Depends(require_role(*READ_ROLES)),
 ) -> list[dict[str, object]]:
     """Open referrals, most urgent first, then oldest first.
 
     Backed by ix_referrals_status_priority_created.
     """
-    rows = session.execute(
-        select(Referral)
-        .where(
-            Referral.status.in_(
-                [
-                    ReferralStatus.SUBMITTED,
-                    ReferralStatus.ACCEPTED,
-                    ReferralStatus.SCHEDULED,
-                ]
+    rows = (
+        session.execute(
+            select(Referral)
+            .where(
+                Referral.status.in_(
+                    [
+                        ReferralStatus.SUBMITTED,
+                        ReferralStatus.ACCEPTED,
+                        ReferralStatus.SCHEDULED,
+                    ]
+                )
             )
+            .order_by(Referral.priority.desc(), Referral.created_at.asc())
+            .limit(limit)
         )
-        .order_by(Referral.priority.desc(), Referral.created_at.asc())
-        .limit(limit)
-    ).scalars()
+        .scalars()
+        .all()
+    )
+
+    pairs = [(r.id, r.patient_id) for r in rows]
+    access_audit.stage(session, user.email, "referral.list", pairs)
+    session.commit()
+    access_audit.emit(user.email, "referral.list", pairs)
 
     return [
         {
@@ -230,27 +240,33 @@ def worklist(
 
 
 @app.post("/patients", response_model=PatientOut, status_code=status.HTTP_201_CREATED)
+@access_audit.audited("patient.create")
 def create_patient(
     payload: PatientCreate,
     session: Session = Depends(get_session),
-    _user: User = Depends(require_role(*WRITE_ROLES)),
+    user: User = Depends(require_role(*WRITE_ROLES)),
 ) -> Patient:
     """Create a patient. 409s if the MRN is already in use."""
     patient = Patient(**payload.model_dump())
     session.add(patient)
     try:
-        session.commit()
+        session.flush()
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"patient with mrn '{payload.mrn}' already exists",
         ) from exc
+    pairs: list[access_audit.Pair] = [(None, patient.id)]
+    access_audit.stage(session, user.email, "patient.create", pairs)
+    session.commit()
+    access_audit.emit(user.email, "patient.create", pairs)
     session.refresh(patient)
     return patient
 
 
 @app.post("/referrals", response_model=ReferralOut, status_code=status.HTTP_201_CREATED)
+@access_audit.audited("referral.create")
 def create_referral(
     payload: ReferralCreate,
     session: Session = Depends(get_session),
@@ -289,6 +305,8 @@ def create_referral(
             note=payload.reason,
         )
     )
+    pairs: list[access_audit.Pair] = [(referral.id, referral.patient_id)]
+    access_audit.stage(session, user.email, "referral.create", pairs)
     session.commit()
     audit(
         "referral.created",
@@ -297,16 +315,18 @@ def create_referral(
         from_status=None,
         to_status=ReferralStatus.DRAFT.value,
     )
+    access_audit.emit(user.email, "referral.create", pairs)
     session.refresh(referral)
     return referral
 
 
 @app.post("/referrals/{referral_id}/assign", response_model=ReferralOut)
+@access_audit.audited("referral.assign")
 def assign_referral(
     referral_id: int,
     payload: ReferralAssignRequest,
     session: Session = Depends(get_session),
-    _user: User = Depends(require_role(*ROUTING_ROLES)),
+    user: User = Depends(require_role(*ROUTING_ROLES)),
 ) -> Referral:
     """Assign a provider to a referral. Validated by
     referral_rules.validate_assignment (status/specialty/capacity)."""
@@ -325,13 +345,31 @@ def assign_referral(
 
     validate_assignment(referral, provider)
 
+    old_provider_id = referral.assigned_provider_id
     referral.assigned_provider_id = provider.id
+    pairs: list[access_audit.Pair] = [(referral.id, referral.patient_id)]
+    access_audit.stage(
+        session,
+        user.email,
+        "referral.assign",
+        pairs,
+        old_provider_id=old_provider_id,
+        new_provider_id=provider.id,
+    )
     session.commit()
+    access_audit.emit(
+        user.email,
+        "referral.assign",
+        pairs,
+        old_provider_id=old_provider_id,
+        new_provider_id=provider.id,
+    )
     session.refresh(referral)
     return referral
 
 
 @app.post("/referrals/{referral_id}/status", response_model=ReferralOut)
+@access_audit.audited("referral.status")
 def update_referral_status(
     referral_id: int,
     payload: ReferralStatusRequest,
@@ -360,6 +398,8 @@ def update_referral_status(
         )
     )
     referral.status = payload.to_status
+    pairs: list[access_audit.Pair] = [(referral.id, referral.patient_id)]
+    access_audit.stage(session, user.email, "referral.status", pairs)
     session.commit()
     audit(
         "referral.status_changed",
@@ -368,15 +408,17 @@ def update_referral_status(
         from_status=from_status.value,
         to_status=payload.to_status.value,
     )
+    access_audit.emit(user.email, "referral.status", pairs)
     session.refresh(referral)
     return referral
 
 
 @app.get("/referrals/{referral_id}", response_model=ReferralWithEvents)
+@access_audit.audited("referral.read")
 def get_referral(
     referral_id: int,
     session: Session = Depends(get_session),
-    _user: User = Depends(require_role(*READ_ROLES)),
+    user: User = Depends(require_role(*READ_ROLES)),
 ) -> ReferralWithEvents:
     """Fetch a referral plus its full status-change history."""
     referral = session.get(Referral, referral_id)
@@ -394,6 +436,10 @@ def get_referral(
         .scalars()
         .all()
     )
+    pairs: list[access_audit.Pair] = [(referral.id, referral.patient_id)]
+    access_audit.stage(session, user.email, "referral.read", pairs)
+    session.commit()
+    access_audit.emit(user.email, "referral.read", pairs)
     return ReferralWithEvents(
         **ReferralOut.model_validate(referral).model_dump(),
         events=[ReferralEventOut.model_validate(e) for e in events],
