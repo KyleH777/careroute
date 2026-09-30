@@ -18,12 +18,14 @@ import enum
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
     Enum,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     func,
@@ -293,4 +295,51 @@ class LoginAttempt(Base):
     __table_args__ = (
         Index("ix_login_attempts_email_time", "email", "occurred_at"),
         Index("ix_login_attempts_ip_time", "client_ip", "occurred_at"),
+    )
+
+
+RECORD_ACCESS_ACTIONS: tuple[str, ...] = (
+    "referral.list",
+    "referral.read",
+    "patient.create",
+    "referral.create",
+    "referral.assign",
+    "referral.status",
+)
+
+
+class RecordAccess(Base):
+    """One row per record returned or changed (ADR-0014).
+
+    IDs and actor only: never names, MRN, DOB or free text. Append-only for the
+    app role (INSERT/SELECT; see scripts/db_roles.py). No foreign keys, so rows
+    outlive the record they describe.
+    """
+
+    __tablename__ = "record_access"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    actor: Mapped[str] = mapped_column(String(254), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    referral_id: Mapped[int | None] = mapped_column(Integer)
+    patient_id: Mapped[int | None] = mapped_column(Integer)
+    old_provider_id: Mapped[int | None] = mapped_column(Integer)
+    new_provider_id: Mapped[int | None] = mapped_column(Integer)
+    request_id: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN (" + ", ".join(f"'{a}'" for a in RECORD_ACCESS_ACTIONS) + ")",
+            name="ck_record_access_action",
+        ),
+        CheckConstraint(
+            "referral_id IS NOT NULL OR patient_id IS NOT NULL",
+            name="ck_record_access_target",
+        ),
+        Index("ix_record_access_patient_time", "patient_id", "occurred_at"),
+        Index("ix_record_access_referral_time", "referral_id", "occurred_at"),
+        Index("ix_record_access_actor_time", "actor", "occurred_at"),
     )

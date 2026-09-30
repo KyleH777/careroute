@@ -8,8 +8,9 @@ Run as the server admin, before migrations:
 Two roles:
 
 - careroute_migrate  owns every object in schema public and runs Alembic.
-- careroute_app      SELECT/INSERT/UPDATE/DELETE only. No DDL, no TRUNCATE,
-                     no access to alembic_version. The API runs as this.
+- careroute_app      SELECT/INSERT/UPDATE/DELETE only, except append-only
+                     tables (ADR-0014), which are SELECT/INSERT. No DDL, no
+                     TRUNCATE, no access to alembic_version. The API runs as this.
 
 Idempotent: safe on every `compose up`, after a restore, and as the password
 rotation step (every run re-syncs both passwords from the environment).
@@ -47,6 +48,10 @@ ALEMBIC_VERSION_DDL = (
     "version_num VARCHAR(32) NOT NULL, "
     "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
 )
+
+# Tables the app role may only INSERT into and SELECT from (ADR-0014). Revoked
+# after the blanket GRANT below, so a bootstrap re-run cannot re-grant them.
+APPEND_ONLY_TABLES = ("record_access",)
 
 # Everything in schema public that the migrate role should own. Sequences
 # owned by a table column are excluded: they follow their table.
@@ -174,6 +179,16 @@ def bootstrap(conn: psycopg.Connection, migrate: str, app: str) -> int:
             ).format(a)
         )
         cur.execute(sql.SQL("REVOKE ALL ON alembic_version FROM {}").format(a))
+        for table in APPEND_ONLY_TABLES:
+            # Absent on the first run: db-roles runs before the first migration.
+            cur.execute("select to_regclass(%s)", (f"public.{table}",))
+            found = cur.fetchone()
+            if found is not None and found[0] is not None:
+                cur.execute(
+                    sql.SQL("REVOKE UPDATE, DELETE, TRUNCATE ON {} FROM {}").format(
+                        sql.Identifier(table), a
+                    )
+                )
         cur.execute("RESET ROLE")
     return len(misowned)
 
@@ -191,7 +206,7 @@ def main() -> int:
         log.error("role bootstrap failed: %s", exc.diag.message_primary or exc)
         return 1
     log.info(
-        "roles ready: %s (owner), %s (DML only); %d object(s) changed owner; "
+        "roles ready: %s (owner), %s (DML only, append-only tables INSERT/SELECT); %d object(s) changed owner; "
         "passwords synced",
         migrate,
         app,
