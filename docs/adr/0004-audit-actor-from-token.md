@@ -1,6 +1,6 @@
 # ADR-0004: Audit trail actor comes from the authenticated identity
 
-- **Status:** Accepted
+- **Status:** Accepted; the known gaps below are closed by [ADR-0014](0014-phi-access-audit.md)
 - **Date:** 2026-09-23
 
 ## Context

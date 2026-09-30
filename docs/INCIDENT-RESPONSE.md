@@ -85,6 +85,8 @@ docker compose logs --timestamps > backups/incident-logs-$(date -u +%Y%m%dT%H%M%
 
 **Azure:** there is no `backup.sh`. Instead:
 
+- **Export `record_access` for the incident window** before any prune
+  (RUNBOOK → Record access), alongside the logs below.
 - **Write down the UTC time.** Point-in-time restore to a new server can
   recover the database as it was at any moment in the last 7 days, so the
   timestamp *is* the snapshot. Don't restore yet unless you need to
@@ -189,17 +191,47 @@ select email, role, is_active, created_at from users order by created_at;
 `actor` is trustworthy: it comes from the verified token and **cannot** be set
 by the client (enforced and tested).
 
+Reads and provider assignments are in `record_access`, one row per record
+returned or changed ([ADR-0014](adr/0014-phi-access-audit.md)):
+
+```sql
+-- who accessed patient X in the window
+select occurred_at, actor, action, referral_id, request_id
+from record_access
+where patient_id = <patient-id>
+  and occurred_at between '<start>' and '<end>'
+order by occurred_at;
+
+-- everything account Y read or changed
+select occurred_at, action, referral_id, patient_id, old_provider_id, new_provider_id
+from record_access
+where actor = 'y@example.com'
+  and occurred_at between '<start>' and '<end>'
+order by occurred_at desc;
+
+-- how many distinct patients account Y touched
+select count(distinct patient_id), count(distinct referral_id), count(*)
+from record_access
+where actor = 'y@example.com'
+  and occurred_at between '<start>' and '<end>';
+```
+
+For the Azure `sql()` form and the KQL equivalents, see RUNBOOK → Record
+access.
+
 **Be explicit about what the system does *not* record.** It shapes what you
 can tell regulators and patients:
 
-- **Reads are not logged.** If an account was compromised, you **cannot**
-  prove which patient records it viewed. Scope has to assume everything that
-  account's role could read.
-- **Provider assignments are not logged.**
-- **There is no access log of login attempts,** so brute-forcing isn't
-  visible, and there is **no login rate limiting**.
-- Log retention is whatever the container runtime keeps. There is no
-  central log store yet.
+- **Login attempts** are logged in `login_attempts` and as `auth.login`
+  lines, and rate limited (ADR-0013).
+- **Denied and not-found attempts** appear only in the request log, not in
+  `record_access`.
+- **IDs returned, not fields viewed.** You can say which records an account
+  was sent, not which parts it looked at.
+- **A migrate or admin credential can alter rows.** The Log Analytics copy is
+  the independent check.
+- **IDs are reused after `seed --reset`.** Always filter by time window.
+- Log Analytics keeps 90 days, with a 0.5 GB/day ingestion cap.
 
 ### Notify
 
@@ -223,9 +255,7 @@ These gaps directly limit incident response. They are the priority list:
 
 | Gap | Why it matters in an incident |
 |---|---|
-| No read/access logging | Can't scope what a compromised account viewed |
 | Alerting has a zero-traffic blind spot | DB outages, 5xx spikes and `/ready` failures now email the owner (ADR-0012), but an API that can't start while nobody is using it isn't noticed until the next request |
-| Assignment not in the audit log | Can't reconstruct who routed a patient where |
 | Single-region, single database | No failover; a database outage is a full outage |
 
 ---

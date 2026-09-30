@@ -1,6 +1,6 @@
 # ADR-0010: Least-privilege database roles and per-workload identities
 
-- **Status:** Accepted (amends ADR-0008)
+- **Status:** Accepted (amends ADR-0008); append-only exception for record_access in [ADR-0014](0014-phi-access-audit.md)
 - **Date:** 2026-09-26
 
 ## Context

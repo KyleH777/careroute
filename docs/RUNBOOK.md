@@ -303,10 +303,107 @@ docker compose exec db psql -U careroute -d careroute -c "
 Azure: run the same `select` as an in-VNet one-off job
 ([AZURE.md → Querying the database from inside the VNet](AZURE.md#querying-the-database-from-inside-the-vnet)).
 
-**Know the gaps before you rely on this:** only status changes are logged.
-**Reads are not logged** (you cannot tell which patients an account viewed),
-and **provider assignment is not logged**. See INCIDENT-RESPONSE.md →
-Known limitations.
+For reads and provider assignments, use
+[Record access](#record-access-who-read-or-changed-which-record) below.
+
+### Record access (who read or changed which record)
+
+Every request to the six PHI routes (worklist, referral read, patient create,
+referral create, assign, status change) writes one `record_access` row per
+record returned or changed: time, actor (the email from the token, never the
+request body), action, referral ID, patient ID, old and new provider for
+assignments, and the request ID. IDs only, never names or free text. The same
+facts go to Log Analytics as an `audit` line
+([ADR-0014](adr/0014-phi-access-audit.md)). Only successful access is
+recorded; denied and not-found attempts are only in the request log.
+
+**IDs can be reused.** `seed --reset` keeps audit rows but restarts IDs, so an
+old row can refer to a different record with the same ID. Always filter by a
+time window. Every query below does. Replace `<T1>` and `<T2>` with
+timestamps like `2026-09-29 00:00:00+00`.
+
+Use the `sql()` helper from
+[Login attempts](#login-attempts-rate-limiting-and-evidence) (Azure), or
+`docker compose exec db psql -U careroute -d careroute -c "..."` locally.
+
+Who accessed patient X between T1 and T2:
+
+```bash
+sql "select occurred_at, actor, action, referral_id, request_id from record_access where patient_id = <patient-id> and occurred_at between timestamptz '<T1>' and timestamptz '<T2>' order by occurred_at"
+```
+
+Who accessed referral X between T1 and T2:
+
+```bash
+sql "select occurred_at, actor, action, patient_id, request_id from record_access where referral_id = <referral-id> and occurred_at between timestamptz '<T1>' and timestamptz '<T2>' order by occurred_at"
+```
+
+Everything user Y read or changed between T1 and T2, newest first:
+
+```bash
+sql "select occurred_at, action, referral_id, patient_id, old_provider_id, new_provider_id, request_id from record_access where actor = '<email>' and occurred_at between timestamptz '<T1>' and timestamptz '<T2>' order by occurred_at desc limit 500"
+```
+
+Scope: how many distinct patients and referrals account Y touched:
+
+```bash
+sql "select count(distinct patient_id), count(distinct referral_id), count(*), min(occurred_at), max(occurred_at) from record_access where actor = '<email>' and occurred_at between timestamptz '<T1>' and timestamptz '<T2>'"
+```
+
+Provider-assignment history of referral X:
+
+```bash
+sql "select occurred_at, actor, old_provider_id, new_provider_id, request_id from record_access where referral_id = <referral-id> and action = 'referral.assign' and occurred_at between timestamptz '<T1>' and timestamptz '<T2>' order by occurred_at"
+```
+
+**Prune** (no automatic cleanup; the table grows with every read). The app
+role cannot `DELETE` from `record_access` by design, so `sql()` is refused.
+Export the rows for any incident window first, then run this as the migrate
+role through the `careroute-migrate` job
+([AZURE.md → Job environments](AZURE.md#job-environments)):
+
+```bash
+az containerapp job start -g careroute-rg -n careroute-migrate --container-name migrate --image "$IMG" --env-vars "${MIGRATE_ENV[@]}" --command python --args "-cimport os, sqlalchemy as sa; c = sa.create_engine(os.environ['DATABASE_URL']).connect(); r = c.execute(sa.text(\"delete from record_access where occurred_at < now() - interval '<N> days'\")); print('rows affected:', r.rowcount); c.commit()" --query name -o tsv
+```
+
+Locally: `docker compose exec db psql -U careroute -d careroute -c "delete from record_access where occurred_at < now() - interval '<N> days'"`.
+
+The same facts in Log Analytics (a second copy the database credentials
+cannot alter; kept 90 days). Who accessed patient X between T1 and T2:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where TimeGenerated between (datetime(<T1>) .. datetime(<T2>))
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "audit"
+| mv-expand pid = e.patient_ids to typeof(long)
+| where pid == <patient-id>
+| project TimeGenerated, actor = tostring(e.actor), action = tostring(e.action), request_id = tostring(e.request_id)
+```
+
+Who accessed referral X between T1 and T2:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where TimeGenerated between (datetime(<T1>) .. datetime(<T2>))
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "audit"
+| mv-expand rid = e.referral_ids to typeof(long)
+| where rid == <referral-id>
+| project TimeGenerated, actor = tostring(e.actor), action = tostring(e.action), request_id = tostring(e.request_id)
+```
+
+Everything user Y read or changed, newest first (also shows the older
+`referral.created` and `referral.status_changed` lines):
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where TimeGenerated between (datetime(<T1>) .. datetime(<T2>))
+| extend e = parse_json(Log_s)
+| where tostring(e.event) == "audit" and tostring(e.actor) == "<email>"
+| project TimeGenerated, action = tostring(e.action), referral_ids = e.referral_ids, patient_ids = e.patient_ids, old_provider_id = toint(e.old_provider_id), new_provider_id = toint(e.new_provider_id), from_status = tostring(e.from_status), to_status = tostring(e.to_status), request_id = tostring(e.request_id)
+| order by TimeGenerated desc
+```
 
 ---
 
@@ -317,7 +414,7 @@ Nothing that runs day to day uses the database superuser/admin
 
 | Role | Can | Used by (Compose) | Used by (Azure) |
 |---|---|---|---|
-| `careroute_app` | Read/write rows. No DDL, no TRUNCATE | `api`, tests | API, seed job |
+| `careroute_app` | Read/write rows (`record_access`: insert/read only, append-only, [ADR-0014](adr/0014-phi-access-audit.md)). No DDL, no TRUNCATE | `api`, tests | API, seed job |
 | `careroute_migrate` | Owns the schema | `migrate`, test cleanup, `seed --reset` | migrate job |
 | superuser / server admin | Everything | `db-roles` only | `careroute-db-bootstrap` only |
 
@@ -326,6 +423,8 @@ Nothing that runs day to day uses the database superuser/admin
 | api logs `permission denied for table <x>` | A table isn't granted to the app role (created outside a migration, or restored by a superuser) | Re-run the role bootstrap: `docker compose run --rm db-roles` / `az containerapp job start -g careroute-rg -n careroute-db-bootstrap`. It re-applies ownership and grants |
 | `password authentication failed for user "careroute_app"` in Azure | Role password rotated in Key Vault but not yet in Postgres | Run `careroute-db-bootstrap`, then restart the API ([AZURE.md → Secrets and rotation](AZURE.md#secrets-and-rotation)) |
 | `must be owner of sequence` / `permission denied` on TRUNCATE | Something tried to truncate as the app role | Run it as the migrate role, e.g. `docker compose run --rm migrate python scripts/seed.py --reset` |
+| Every PHI request returns 500 with `permission denied for table record_access` on INSERT | The app role lost its grant on the audit table (fail closed by design) | Re-run db-roles (same command as above) |
+| `UPDATE`/`DELETE` refused on `record_access` | Expected: the table is append-only for the app role | Prune as the migrate role ([Record access](#record-access-who-read-or-changed-which-record)) |
 | A new migration's table is unreadable by the app | Shouldn't happen: default privileges cover tables the migrate role creates, and `tests/test_db_roles.py` fails CI if not | Check the migration ran as `careroute_migrate`, then re-run db-roles |
 
 ---
@@ -522,16 +621,6 @@ ContainerAppConsoleLogs_CL
 | summarize n = count() by bin(TimeGenerated, 5m)
 ```
 
-Everything user Y changed (audit), newest first:
-
-```kusto
-ContainerAppConsoleLogs_CL
-| extend e = parse_json(Log_s)
-| where tostring(e.event) == "audit" and tostring(e.actor) == "<email>"
-| project TimeGenerated, action = tostring(e.action), referral_id = toint(e.referral_id), from_status = tostring(e.from_status), to_status = tostring(e.to_status), request_id = tostring(e.request_id)
-| order by TimeGenerated desc
-```
-
 Who changed referral X between T1 and T2:
 
 ```kusto
@@ -551,8 +640,9 @@ ContainerAppConsoleLogs_CL
 | order by TimeGenerated asc
 ```
 
-The audit trail only covers changes. **Reads are not audited yet**
-(INCIDENT-RESPONSE → Known limitations; roadmap Phase 6).
+For reads and assignments (who accessed patient X, everything user Y read or
+changed), see the KQL under
+[Record access](#record-access-who-read-or-changed-which-record).
 
 ---
 
@@ -584,7 +674,7 @@ AZURE.md → Metrics. Locally: `curl localhost:9000`.
 | Row counts | `curl -s localhost:8000/stats` |
 | Published images | `ghcr.io/kyleh777/careroute:latest`, `:sha-<commit>` |
 | Azure: names and URL | `cd infra && terraform output` |
-| Azure: logs | `az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 100` (live replica only; wakes the app if it's scaled to zero. Older: Log Analytics `ContainerAppConsoleLogs_CL`, 30-day retention) |
+| Azure: logs | `az containerapp logs show -g careroute-rg -n careroute-api --type console --tail 100` (live replica only; wakes the app if it's scaled to zero. Older: Log Analytics `ContainerAppConsoleLogs_CL`, 90-day retention) |
 | Azure: SQL | In-VNet one-off job ([AZURE.md](AZURE.md#querying-the-database-from-inside-the-vnet)) |
 | Azure: current schema revision | `alembic current` through a job override, with `--image` and `--env-vars` ([AZURE.md](AZURE.md#querying-the-database-from-inside-the-vnet)) |
 | Azure: job history | `az containerapp job execution list -g careroute-rg -n careroute-migrate -o table` |
