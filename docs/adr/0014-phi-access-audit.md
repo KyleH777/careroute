@@ -28,3 +28,7 @@ Only status changes were recorded (ADR-0004). Reads and provider assignments wer
 - **Accepted: IDs, not fields.** Rows record which records were returned, not which fields the client displayed.
 - **Accepted: privileged credentials.** A migrate or admin credential can still alter rows. The Log Analytics copy (90 days) is the independent control, so export before it ages out.
 - **Accepted: duplicate write lines.** A write request emits both the older `referral.created` / `referral.status_changed` line and the new access line.
+
+## Verification
+
+Verified live on Azure on 2026-10-01 (read audit as the viewer account) and 2026-10-02 (assignment audit as the coordinator account). Rows in `record_access` and `audit` lines in Log Analytics matched by request ID, the app role was refused `UPDATE` and `DELETE`, and failed assignments (409) wrote no rows, confirming fail-closed behavior. Details in RUNBOOK → Record access.

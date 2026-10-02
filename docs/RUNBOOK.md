@@ -405,6 +405,18 @@ ContainerAppConsoleLogs_CL
 | order by TimeGenerated desc
 ```
 
+**Verified live (2026-10-01 and 2026-10-02).** As `viewer@careroute.demo`, a
+worklist read and a referral read produced matching rows in Postgres and
+lines in Log Analytics (same request IDs), and every query above returned the
+expected rows. Log Analytics showed the lines within about 6 minutes. Log
+Analytics has one `audit` line per request with ID arrays (a worklist of 3
+is one line with 3 IDs); Postgres has one row per record. As the app role,
+`INSERT` is allowed and `UPDATE`/`DELETE` on `record_access` raise
+`InsufficientPrivilege`. A worklist `limit=101` returns 422. An assignment by
+`coordinator@careroute.demo` wrote exactly one `referral.assign` row and one
+log line with the same request ID; assignment attempts that returned 409
+wrote no rows.
+
 ---
 
 ## Database roles
